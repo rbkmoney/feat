@@ -42,16 +42,6 @@
 -export_type([event_handler/0]).
 -export_type([options/0]).
 
-%% -export_type([event_handler/0]).
-%% -export_type([event/0]).
-%% -export_type([schema/0]).
-%% -export_type([request/0]).
-%% -export_type([difference/0]).
-%% -export_type([features/0]).
-%% -export_type([feature_name/0]).
-%% -export_type([feature_value/0]).
-%% -export_type([options/0]).
-
 -export([read/2, read/3]).
 -export([compare/2]).
 -export([hash/1]).
