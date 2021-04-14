@@ -114,7 +114,7 @@ handle_event({Mod, Opts}, Event) ->
     Mod:handle_event(Event, Opts).
 
 get_event_handler() ->
-    genlib_app:env(feat, idempotence_event_handler).
+    genlib_app:env(feat, event_handler, undefined).
 
 get_event_handler({Mod, Options}) ->
     {Mod, Options};
