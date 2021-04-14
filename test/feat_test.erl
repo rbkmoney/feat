@@ -5,7 +5,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(PROP(Prop), ?PROP(Prop, [])).
--define(PROP(Prop, Opts), ?assertEqual(true, proper:quickcheck(Prop, Opts))).
+-define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, Opts))).
 
 -spec test() -> _.
 
@@ -13,6 +13,14 @@
 simple_test() ->
     ok.
 
+%% TODO:
+%%
+
+-spec hash_calculatable_test() -> _.
+hash_calculatable_test() ->
+    ?PROP(?FORALL(Term, term(), is_integer(feat:hash(Term)))).
+
+%% TODO: move all random generation to proper generators
 -spec read_test() -> _.
 read_test() ->
     ?PROP(
@@ -26,20 +34,56 @@ read_test() ->
                 is_map(Features) andalso
                     assert_correct_read(Schema, Features, Entity)
             end
-        ),
-        [{to_file, user}]
+        )
     ).
 
--spec compare_test() -> _.
-compare_test() ->
+-spec compare_same_test() -> _.
+compare_same_test() ->
     ?PROP(
         ?FORALL(
-            _Schema,
+            Schema,
             schema(),
-            %% Fill schema
-            %% Refill random fields and remember them
-            %% Check that returned comparison is correct
-            true
+            begin
+                Entity1 = fill_schema(Schema),
+                SomePaths = random_nonexistent_paths(Schema),
+                Entity2 = change_values_by_paths(SomePaths, Entity1),
+
+                Features1 = feat:read(Schema, Entity1),
+                Features2 = feat:read(Schema, Entity2),
+
+                ?assertEqual(true, feat:compare(Features1, Features2)),
+                true
+            end
+        )
+    ).
+
+-spec compare_different_test() -> _.
+compare_different_test() ->
+    ?PROP(
+        ?FORALL(
+            Schema,
+            schema(),
+            begin
+                Entity1 = fill_schema(Schema),
+
+                %% TODO: move to such that
+                %% ?assertNotEqual(Entity, Entity2),
+                case random_paths(Schema) of
+                    [] ->
+                        true;
+                    SomePaths ->
+                        %% erlang:display({paths, Entity1, SomePaths}),
+                        Entity2 = change_values_by_paths(SomePaths, Entity1),
+
+                        Features1 = feat:read(Schema, Entity1),
+                        Features2 = feat:read(Schema, Entity2),
+
+                        {false, Diff} = feat:compare(Features1, Features2),
+
+                        is_map(Diff) andalso
+                            assert_correct_compare(Diff, SomePaths)
+                end
+            end
         )
     ).
 
@@ -93,10 +137,15 @@ do_build_schema(AvgDepth, [{FeatureID, FeatureName} | RestFeatures], RandState, 
     do_build_schema(AvgDepth, NextFeatures, NextRandState, NextAcc).
 
 features() ->
-    list({integer(), bin_string()}).
+    list({non_neg_integer(), bin_string()}).
 
 bin_string() ->
-    ?LET(String, list(alphanum_char()), erlang:list_to_binary(String)).
+    ?LET(String,
+         %% TODO: Compare tests fail without SUCHTHAT... Reason?
+         ?SUCHTHAT(L,
+                   list(alphanum_char()),
+                   L /= []),
+         erlang:list_to_binary(String)).
 
 alphanum_char() ->
     oneof([
@@ -144,14 +193,13 @@ fill_schema(Schema) ->
             (value, Acc, RevPath) ->
                 %% TODO: applicable term()s generation
                 %% %% TODO?: sparsity (how many are not defined)
-                Value = erlang:list_to_binary(erlang:ref_to_list(make_ref())),
+                Value = generate_unique_binary(),
 
                 NamePath = name_path(lists:reverse(RevPath)),
                 case deep_force_put(NamePath, Value, Acc) of
                     {ok, NewAcc} -> NewAcc;
                     {error, map_overwrite} -> Acc
                 end;
-            %% maps:put(Name, Value, Acc);
             (_, Acc, _) ->
                 Acc
         end,
@@ -165,10 +213,7 @@ assert_correct_read(Schema, Features, Entity) ->
     %% erlang:display({entity, Entity}),
     traverse_schema(
         fun
-            %% (_, false, _) ->
-            %%     false;
-            %%                 %%    TODO: only discriminator here
-
+            %%    TODO: only discriminator here
             %% ({nested, NestedSchema}, true, [{Id, Name} | _] = RevPath) ->
             %%     case maps:find(Id, Features) of
             %%         error ->
@@ -216,6 +261,82 @@ assert_correct_read(Schema, Features, Entity) ->
         true,
         Schema
     ).
+
+assert_correct_compare(Diff, Paths) ->
+    IdPaths = lists:map(fun id_path/1, Paths),
+    %% erlang:display({compare, Diff,
+    %%                 IdPaths,
+    %%                 do_assert_correct_compare(Diff, IdPaths, [])}),
+    [] == do_assert_correct_compare(Diff, IdPaths, []).
+
+do_assert_correct_compare(Diff, Paths, RevPath) ->
+    maps:fold(
+      fun
+          (Key, NestedDiff, PathsAcc) when is_map(NestedDiff) ->
+              do_assert_correct_compare(NestedDiff, PathsAcc, [Key | RevPath]);
+          (Key, ?difference, PathsAcc) ->
+              Path = lists:reverse([Key | RevPath]),
+              %% erlang:display({eliminating, PathsAcc, Path}),
+              PathsAcc -- [Path]
+      end,
+      Paths,
+      Diff).
+
+
+random_paths(Schema) ->
+    traverse_schema(
+        fun
+            (value, Acc, RevPath) ->
+                case rand:uniform(2) of
+                    1 ->
+                        [lists:reverse(RevPath) | Acc];
+                    2 ->
+                        Acc
+                end;
+            (_, Acc, _) ->
+                Acc
+        end,
+        [],
+        Schema
+    ).
+
+random_nonexistent_paths(Schema) ->
+    traverse_schema(
+        fun
+            (value, Acc, RevPath) ->
+                case rand:uniform(2) of
+                    1 ->
+                        [{Id, _Name} | Rest] = RevPath,
+                        NewRevPath = [{Id, generate_unique_binary()} | Rest],
+                        [lists:reverse(NewRevPath) | Acc];
+                    2 ->
+                        Acc
+                end;
+            (_, Acc, _) ->
+                Acc
+        end,
+        [],
+        Schema
+    ).
+
+change_values_by_paths(Paths, Entity) ->
+    lists:foldl(
+        fun(Path, EntityAcc) ->
+                NamePath = name_path(Path),
+                NewValue = generate_unique_binary(),
+                case deep_force_put(NamePath, NewValue, EntityAcc) of
+                    {ok, NewAcc} -> NewAcc
+                    %% {error, map_overwrite} ->
+                        %% erlang:display({map_overwrite, NamePath, EntityAcc, Paths}),
+                        %% throw(no)
+                    end
+        end,
+        Entity,
+        Paths
+    ).
+
+generate_unique_binary() ->
+    erlang:list_to_binary(erlang:ref_to_list(make_ref())).
 
 %% "Force" because any encountered value that's not a map is overwritten
 %% Doesn't work the other way: map is not rewritten with value
