@@ -5,7 +5,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -define(PROP(Prop), ?PROP(Prop, [])).
--define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, Opts))).
+-define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, [{to_file, user}] ++ Opts))).
+
+-define(RAND_ALG, exsss).
 
 -spec test() -> _.
 
@@ -41,9 +43,11 @@ read_test() ->
 compare_same_test() ->
     ?PROP(
         ?FORALL(
-            Schema,
-            schema(),
+            [Schema, Seed],
+            [schema(), integer()],
             begin
+                rand:seed(?RAND_ALG, Seed),
+
                 Entity1 = fill_schema(Schema),
                 SomePaths = random_nonexistent_paths(Schema),
                 Entity2 = change_values_by_paths(SomePaths, Entity1),
@@ -61,9 +65,11 @@ compare_same_test() ->
 compare_different_test() ->
     ?PROP(
         ?FORALL(
-            Schema,
-            schema(),
+            [Schema, Seed],
+            [schema(), integer()],
             begin
+                rand:seed(?RAND_ALG, Seed),
+
                 Entity1 = fill_schema(Schema),
 
                 %% TODO: move to such that
@@ -91,12 +97,43 @@ compare_different_test() ->
 list_diff_fields_test() ->
     ?PROP(
         ?FORALL(
-            _Schema,
-            schema(),
-            %% Fill schema
-            %% Refill random fields and remember path to them
-            %% Check that returned paths are correct
-            true
+            [Schema, Seed],
+            [schema(), integer()],
+            begin
+                rand:seed(?RAND_ALG, Seed),
+
+                Entity1 = fill_schema(Schema),
+
+                %% TODO: move to such that
+                %% ?assertNotEqual(Entity, Entity2),
+                case random_paths(Schema) of
+                    [] ->
+                        true;
+                    SomePaths ->
+                        Entity2 = change_values_by_paths(SomePaths, Entity1),
+
+                        Features1 = feat:read(Schema, Entity1),
+                        Features2 = feat:read(Schema, Entity2),
+
+                        {false, Diff} = feat:compare(Features1, Features2),
+
+                        DiffFields = feat:list_diff_fields(Schema, Diff),
+                        ChangedFields = lists:map(
+                            fun(Path) ->
+                                list_to_binary(
+                                    lists:join(
+                                        $.,
+                                        name_path(Path)
+                                    )
+                                )
+                            end,
+                            SomePaths
+                        ),
+
+                        is_map(Diff) andalso
+                            assertEqualSets(ChangedFields, DiffFields)
+                end
+            end
         )
     ).
 
@@ -107,7 +144,7 @@ schema(AvgDepth) ->
     ?LET(
         [Seed, Features],
         [integer(), features()],
-        build_schema(AvgDepth, Features, rand:seed(exsss, Seed))
+        build_schema(AvgDepth, Features, rand:seed_s(?RAND_ALG, Seed))
     ).
 
 build_schema(AvgDepth, Features, RandState) ->
@@ -140,12 +177,16 @@ features() ->
     list({non_neg_integer(), bin_string()}).
 
 bin_string() ->
-    ?LET(String,
-         %% TODO: Compare tests fail without SUCHTHAT... Reason?
-         ?SUCHTHAT(L,
-                   list(alphanum_char()),
-                   L /= []),
-         erlang:list_to_binary(String)).
+    ?LET(
+        String,
+        %% TODO: Compare tests fail without SUCHTHAT... Reason?
+        ?SUCHTHAT(
+            L,
+            list(alphanum_char()),
+            L /= []
+        ),
+        erlang:list_to_binary(String)
+    ).
 
 alphanum_char() ->
     oneof([
@@ -271,17 +312,17 @@ assert_correct_compare(Diff, Paths) ->
 
 do_assert_correct_compare(Diff, Paths, RevPath) ->
     maps:fold(
-      fun
-          (Key, NestedDiff, PathsAcc) when is_map(NestedDiff) ->
-              do_assert_correct_compare(NestedDiff, PathsAcc, [Key | RevPath]);
-          (Key, ?difference, PathsAcc) ->
-              Path = lists:reverse([Key | RevPath]),
-              %% erlang:display({eliminating, PathsAcc, Path}),
-              PathsAcc -- [Path]
-      end,
-      Paths,
-      Diff).
-
+        fun
+            (Key, NestedDiff, PathsAcc) when is_map(NestedDiff) ->
+                do_assert_correct_compare(NestedDiff, PathsAcc, [Key | RevPath]);
+            (Key, ?difference, PathsAcc) ->
+                Path = lists:reverse([Key | RevPath]),
+                %% erlang:display({eliminating, PathsAcc, Path}),
+                PathsAcc -- [Path]
+        end,
+        Paths,
+        Diff
+    ).
 
 random_paths(Schema) ->
     traverse_schema(
@@ -322,14 +363,14 @@ random_nonexistent_paths(Schema) ->
 change_values_by_paths(Paths, Entity) ->
     lists:foldl(
         fun(Path, EntityAcc) ->
-                NamePath = name_path(Path),
-                NewValue = generate_unique_binary(),
-                case deep_force_put(NamePath, NewValue, EntityAcc) of
-                    {ok, NewAcc} -> NewAcc
-                    %% {error, map_overwrite} ->
-                        %% erlang:display({map_overwrite, NamePath, EntityAcc, Paths}),
-                        %% throw(no)
-                    end
+            NamePath = name_path(Path),
+            NewValue = generate_unique_binary(),
+            case deep_force_put(NamePath, NewValue, EntityAcc) of
+                {ok, NewAcc} -> NewAcc
+                %% {error, map_overwrite} ->
+                %% erlang:display({map_overwrite, NamePath, EntityAcc, Paths}),
+                %% throw(no)
+            end
         end,
         Entity,
         Paths
@@ -380,6 +421,10 @@ do_deep_fetch(Map, [Key | Rest], Path) ->
         {ok, NextValue} ->
             do_deep_fetch(NextValue, Rest, NewPath)
     end.
+
+assertEqualSets(List1, List2) ->
+    ?assertEqual(List1 -- List2, List2 -- List1),
+    true.
 
 id_path(Path) ->
     lists:map(fun({Id, _Name}) -> Id end, Path).
