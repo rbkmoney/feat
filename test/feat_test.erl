@@ -8,6 +8,7 @@
 -define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, [{to_file, user}] ++ Opts))).
 
 -define(RAND_ALG, exsss).
+-define(SET_SEED(Seed), _ = rand:seed(?RAND_ALG, Seed)).
 
 -spec test() -> _.
 
@@ -46,7 +47,7 @@ compare_same_test() ->
             [Schema, Seed],
             [schema(), integer()],
             begin
-                rand:seed(?RAND_ALG, Seed),
+                ?SET_SEED(Seed),
 
                 Entity1 = fill_schema(Schema),
                 SomePaths = random_nonexistent_paths(Schema),
@@ -68,7 +69,7 @@ compare_different_test() ->
             [Schema, Seed],
             [schema(), integer()],
             begin
-                rand:seed(?RAND_ALG, Seed),
+                ?SET_SEED(Seed),
 
                 Entity1 = fill_schema(Schema),
 
@@ -100,7 +101,7 @@ list_diff_fields_test() ->
             [Schema, Seed],
             [schema(), integer()],
             begin
-                rand:seed(?RAND_ALG, Seed),
+                ?SET_SEED(Seed),
 
                 Entity1 = fill_schema(Schema),
 
@@ -284,7 +285,7 @@ assert_correct_read(Schema, Features, Entity) ->
                         true;
                     {{error, not_found, _}, {ok, _}} ->
                         throw({feature_unused, Path, Entity, Features, Schema});
-                    {{ok, _}, {error, not_found}} ->
+                    {{ok, _}, {error, not_found, _}} ->
                         throw({unknown_feature, Path, Entity, Features, Schema});
                     {{ok, Map}, {ok, _}} when is_map(Map) ->
                         throw({nested_features, Path});
