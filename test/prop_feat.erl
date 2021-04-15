@@ -1,8 +1,8 @@
--module(feat_test).
+-module(prop_feat).
 
 -include("feat.hrl").
 -include_lib("proper/include/proper.hrl").
--include_lib("eunit/include/eunit.hrl").
+-include_lib("stdlib/include/assert.hrl").
 
 -define(PROP(Prop), ?PROP(Prop, [])).
 -define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, [{to_file, user}] ++ Opts))).
@@ -10,132 +10,114 @@
 -define(RAND_ALG, exsss).
 -define(SET_SEED(Seed), _ = rand:seed(?RAND_ALG, Seed)).
 
--spec test() -> _.
+-spec prop_hash_calculatable() -> proper:test().
+prop_hash_calculatable() ->
+    ?FORALL(Term, term(), is_integer(feat:hash(Term))).
 
--spec simple_test() -> _.
-simple_test() ->
-    ok.
+-spec prop_read() -> proper:test().
+prop_read() ->
+    ?FORALL(
+        Schema,
+        schema(),
+        begin
+            Entity = fill_schema(Schema),
+            Features = feat:read(Schema, Entity),
 
-%% TODO:
-%%
-
--spec hash_calculatable_test() -> _.
-hash_calculatable_test() ->
-    ?PROP(?FORALL(Term, term(), is_integer(feat:hash(Term)))).
-
-%% TODO: move all random generation to proper generators
--spec read_test() -> _.
-read_test() ->
-    ?PROP(
-        ?FORALL(
-            Schema,
-            schema(),
-            begin
-                Entity = fill_schema(Schema),
-                Features = feat:read(Schema, Entity),
-
-                is_map(Features) andalso
-                    assert_correct_read(Schema, Features, Entity)
-            end
-        )
+            is_map(Features) andalso
+                assert_correct_read(Schema, Features, Entity)
+        end
     ).
 
--spec compare_same_test() -> _.
-compare_same_test() ->
-    ?PROP(
-        ?FORALL(
-            [Schema, Seed],
-            [schema(), integer()],
-            begin
-                ?SET_SEED(Seed),
+-spec prop_compare_same() -> proper:test().
+prop_compare_same() ->
+    ?FORALL(
+        [Schema, Seed],
+        [schema(), integer()],
+        begin
+            ?SET_SEED(Seed),
 
-                Entity1 = fill_schema(Schema),
-                SomePaths = random_nonexistent_paths(Schema),
-                Entity2 = change_values_by_paths(SomePaths, Entity1),
+            Entity1 = fill_schema(Schema),
+            SomePaths = random_nonexistent_paths(Schema),
+            Entity2 = change_values_by_paths(SomePaths, Entity1),
 
-                Features1 = feat:read(Schema, Entity1),
-                Features2 = feat:read(Schema, Entity2),
+            Features1 = feat:read(Schema, Entity1),
+            Features2 = feat:read(Schema, Entity2),
 
-                ?assertEqual(true, feat:compare(Features1, Features2)),
-                true
-            end
-        )
+            ?assertEqual(true, feat:compare(Features1, Features2)),
+            true
+        end
     ).
 
--spec compare_different_test() -> _.
-compare_different_test() ->
-    ?PROP(
-        ?FORALL(
-            [Schema, Seed],
-            [schema(), integer()],
-            begin
-                ?SET_SEED(Seed),
+-spec prop_compare_different() -> proper:test().
+prop_compare_different() ->
+    ?FORALL(
+        [Schema, Seed],
+        [schema(), integer()],
+        begin
+            ?SET_SEED(Seed),
 
-                Entity1 = fill_schema(Schema),
+            Entity1 = fill_schema(Schema),
 
-                %% TODO: move to such that
-                %% ?assertNotEqual(Entity, Entity2),
-                case random_paths(Schema) of
-                    [] ->
-                        true;
-                    SomePaths ->
-                        %% erlang:display({paths, Entity1, SomePaths}),
-                        Entity2 = change_values_by_paths(SomePaths, Entity1),
+            %% TODO: move to such that
+            %% ?assertNotEqual(Entity, Entity2),
+            case random_paths(Schema) of
+                [] ->
+                    true;
+                SomePaths ->
+                    %% erlang:display({paths, Entity1, SomePaths}),
+                    Entity2 = change_values_by_paths(SomePaths, Entity1),
 
-                        Features1 = feat:read(Schema, Entity1),
-                        Features2 = feat:read(Schema, Entity2),
+                    Features1 = feat:read(Schema, Entity1),
+                    Features2 = feat:read(Schema, Entity2),
 
-                        {false, Diff} = feat:compare(Features1, Features2),
+                    {false, Diff} = feat:compare(Features1, Features2),
 
-                        is_map(Diff) andalso
-                            assert_correct_compare(Diff, SomePaths)
-                end
+                    is_map(Diff) andalso
+                        assert_correct_compare(Diff, SomePaths)
             end
-        )
+        end
     ).
 
--spec list_diff_fields_test() -> _.
-list_diff_fields_test() ->
-    ?PROP(
-        ?FORALL(
-            [Schema, Seed],
-            [schema(), integer()],
-            begin
-                ?SET_SEED(Seed),
+-spec prop_list_diff_fields() -> proper:test().
+prop_list_diff_fields() ->
+    ?FORALL(
+        [Schema, Seed],
+        [schema(), integer()],
+        begin
+            ?SET_SEED(Seed),
 
-                Entity1 = fill_schema(Schema),
+            Entity1 = fill_schema(Schema),
 
-                %% TODO: move to such that
-                %% ?assertNotEqual(Entity, Entity2),
-                case random_paths(Schema) of
-                    [] ->
-                        true;
-                    SomePaths ->
-                        Entity2 = change_values_by_paths(SomePaths, Entity1),
+            %% TODO: move to such that
+            %% ?assertNotEqual(Entity, Entity2),
+            case random_paths(Schema) of
+                [] ->
+                    true;
+                SomePaths ->
+                    Entity2 = change_values_by_paths(SomePaths, Entity1),
 
-                        Features1 = feat:read(Schema, Entity1),
-                        Features2 = feat:read(Schema, Entity2),
+                    Features1 = feat:read(Schema, Entity1),
+                    Features2 = feat:read(Schema, Entity2),
 
-                        {false, Diff} = feat:compare(Features1, Features2),
+                    {false, Diff} = feat:compare(Features1, Features2),
 
-                        DiffFields = feat:list_diff_fields(Schema, Diff),
-                        ChangedFields = lists:map(
-                            fun(Path) ->
-                                list_to_binary(
-                                    lists:join(
-                                        $.,
-                                        name_path(Path)
-                                    )
+                    DiffFields = feat:list_diff_fields(Schema, Diff),
+                    ChangedFields = lists:map(
+                        fun(Path) ->
+                            list_to_binary(
+                                lists:join(
+                                    $.,
+                                    name_path(Path)
                                 )
-                            end,
-                            SomePaths
-                        ),
+                            )
+                        end,
+                        SomePaths
+                    ),
 
-                        is_map(Diff) andalso
-                            assertEqualSets(ChangedFields, DiffFields)
-                end
+                    is_map(Diff) andalso
+                        assertEqualSets(ChangedFields, DiffFields)
             end
-        )
+        end
     ).
 
 schema() ->
