@@ -278,21 +278,23 @@ identifier() ->
     ?LET(
         [Parts, Separator],
         %% TODO: Compare tests fail without SUCHTHAT... Reason?
-        [?SUCHTHAT(
-            L,
-            list(alphanum_char()),
-            L /= []
-        ),
-         oneof([$_, $-])],
+        [
+            ?SUCHTHAT(
+                L,
+                list(alphanum_char()),
+                L /= []
+            ),
+            oneof([$_, $-])
+        ],
         erlang:list_to_binary(lists:join(Separator, Parts))
     ).
 
-alphanum_char()->
+alphanum_char() ->
     oneof([
-           integer(16#30, 16#39),
-           integer(16#41, 16#5A),
-           integer(16#61, 16#7A)
-          ]).
+        integer(16#30, 16#39),
+        integer(16#41, 16#5A),
+        integer(16#61, 16#7A)
+    ]).
 
 %% Probably useful functions for ?SUCHTHAT
 
@@ -515,23 +517,23 @@ do_assert_correct_compare(Diff, Paths, Entity1, Entity2, RevPath) ->
 
 pathspecs(Schema) ->
     traverse_schema(
-      fun
-          (value, Acc, [{Id, Name} | _]) ->
-              [{value, Id, Name} | Acc];
-          ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
-              NestedPaths = pathspecs(NestedSchema),
-              Element = {nested, Id, Name, NestedPaths, NestedSchema},
-              NewAcc = [Element | Acc],
-              {no_traverse, NewAcc};
-          ({set, NestedSchema}, Acc, [{Id, Name} | _]) ->
-              NestedPaths = pathspecs(NestedSchema),
-              Element = {set, Id, Name, NestedPaths, NestedSchema},
-              NewAcc = [Element | Acc],
-              {no_traverse, NewAcc}
-      end,
-      [],
-      Schema
-     ).
+        fun
+            (value, Acc, [{Id, Name} | _]) ->
+                [{value, Id, Name} | Acc];
+            ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
+                NestedPaths = pathspecs(NestedSchema),
+                Element = {nested, Id, Name, NestedPaths, NestedSchema},
+                NewAcc = [Element | Acc],
+                {no_traverse, NewAcc};
+            ({set, NestedSchema}, Acc, [{Id, Name} | _]) ->
+                NestedPaths = pathspecs(NestedSchema),
+                Element = {set, Id, Name, NestedPaths, NestedSchema},
+                NewAcc = [Element | Acc],
+                {no_traverse, NewAcc}
+        end,
+        [],
+        Schema
+    ).
 random_pathspecs(Schema) ->
     traverse_schema(
         fun
@@ -577,7 +579,6 @@ random_nonexistent_pathspecs(Schema) ->
             ({set, _Nested}, Acc, _RevPath) ->
                 %% Can't create nonexistent paths for sets
                 {no_traverse, Acc};
-
             ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
                 NewAcc =
                     case random_nonexistent_pathspecs(NestedSchema) of
@@ -826,24 +827,28 @@ do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
 do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
     PathSpecs = pathspecs(NestedSchema),
     case maps:get(Id, Diff) of
-        -1 -> [[Name]];
+        -1 ->
+            [[Name]];
         SetDiff ->
-            lists:flatmap( %% For each element of set
-              fun({Index, NestedDiff}) ->
-                      lists:flatmap( %%
+            %% For each element of set
+            lists:flatmap(
+                fun({Index, NestedDiff}) ->
+                    %%
+                    lists:flatmap(
                         fun(PathSpec) ->
-                                %% io:fwrite("~p~n", [{spec, PathSpec}]),
-                                lists:map(
-                                  fun(NextPath) ->
-                                          [Name, erlang:integer_to_binary(Index) | NextPath]
-                                  end,
-                                  do_pathspec_to_binpath(PathSpec, NestedDiff)
-                                 )
+                            %% io:fwrite("~p~n", [{spec, PathSpec}]),
+                            lists:map(
+                                fun(NextPath) ->
+                                    [Name, erlang:integer_to_binary(Index) | NextPath]
+                                end,
+                                do_pathspec_to_binpath(PathSpec, NestedDiff)
+                            )
                         end,
                         PathSpecs
-                       )
-              end,
-              maps:to_list(SetDiff))
+                    )
+                end,
+                maps:to_list(SetDiff)
+            )
     end.
 
 traverse_schema(Fun, Acc, Schema) ->
