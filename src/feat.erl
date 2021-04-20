@@ -146,7 +146,8 @@ list_diff_fields(Schema, Diff) ->
 list_diff_fields_(Diffs, {set, Schema}, Acc) when is_map(Schema) ->
     maps:fold(
         fun(I, Diff, {PathsAcc, PathRev}) ->
-            list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]})
+            {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
+            {NewPathsAcc, PathRev}
         end,
         Acc,
         Diffs
