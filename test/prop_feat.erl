@@ -181,45 +181,47 @@ prop_list_diff_fields() ->
     ).
 
 schema() ->
-    schema(3).
+    schema(#{avg_depth => 3}).
 
-schema(AvgDepth) ->
+schema(Opts) ->
     ?LET(
-        [Seed, Features],
-        [integer(), features()],
-        build_schema(AvgDepth, Features, rand:seed_s(?RAND_ALG, Seed))
+        Features,
+        features(),
+        build_schema(Opts, Features)
     ).
 
-build_schema(AvgDepth, Features, RandState) ->
-    {_, _, SchemaAcc} = do_build_schema(AvgDepth, Features, RandState, #{}),
+build_schema(Opts, Features) ->
+    {_, SchemaAcc} = do_build_schema(Opts, Features, #{}),
     SchemaAcc.
 
-do_build_schema(_AvgDepth, [], RandState, Acc) ->
-    {[], RandState, Acc};
-do_build_schema(AvgDepth, [{FeatureID, FeatureName} | RestFeatures], RandState, Acc) ->
+%% TODO: remove RandState
+do_build_schema(_Opts, [], Acc) ->
+    {[], Acc};
+do_build_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
+    AvgDepth = maps:get(avg_depth, Opts, 3),
+
     %% Dice: 1 means simple field, 2 ­ Union nested schema (with discriminator), >1 ­ nested schema
-    {DiceNested, RandState1} = rand:uniform_s(AvgDepth + 1, RandState),
-    %% {DiceValueKind, RandState2} = rand:uniform_s(2, RandState1),
-    {DiceUnion, RandState2} = rand:uniform_s(2, RandState1),
+    DiceNested = rand:uniform(AvgDepth + 1),
+    %% DiceValueKind = rand:uniform(2),
+    DiceUnion = rand:uniform(2),
     %% TODO: add sets
-    {NextFeatures, NextRandState, NextAcc} =
+    {NextFeatures, NextAcc} =
         if
             %% SetSchema
             %% NestedSchema (inc. set)
             DiceNested > 1, DiceUnion == 1, tl(RestFeatures) /= [] ->
-                {LeftFeatures, RandState3, NestedSchema} = do_build_schema(
-                    AvgDepth,
+                {LeftFeatures, NestedSchema} = do_build_schema(
+                    Opts,
                     RestFeatures,
-                    RandState2,
                     #{}
                 ),
-                {DiceValueKind, RandState4} = rand:uniform_s(2, RandState3),
+                DiceValueKind = rand:uniform(2),
                 Value =
                     case DiceValueKind of
                         1 -> NestedSchema;
                         2 -> {set, NestedSchema}
                     end,
-                {LeftFeatures, RandState4, maps:put(FeatureID, [FeatureName, Value], Acc)};
+                {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)};
             %% %% DiscriminatedSchema
             %% DiceNested > 1, tl(RestFeatures) /= [] ->
             %%     {LeftFeatures, ReturnedRandState, NestedSchema} = do_build_schema(
@@ -229,11 +231,10 @@ do_build_schema(AvgDepth, [{FeatureID, FeatureName} | RestFeatures], RandState, 
             %%                                                         #{}
             %%                                                        ),
             %%     {LeftFeatures, ReturnedRandState, maps:put(FeatureID, [FeatureName, NestedSchema], Acc)};
-            %% SetSchema
             %% DiceValueKind == 2 ->
-            %%     {RestFeatures, NewRandState, maps:put(FeatureID, [FeatureName], Acc)} ;
+            %%     {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)};
             true ->
-                {RestFeatures, RandState2, maps:put(FeatureID, [FeatureName], Acc)}
+                {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)}
         end,
     %% case {DiceNested, DiceUnion, RestFeatures} of
     %%     %% Simple nested schema
@@ -258,7 +259,7 @@ do_build_schema(AvgDepth, [{FeatureID, FeatureName} | RestFeatures], RandState, 
     %%     _ ->
     %%         {RestFeatures, NewRandState, maps:put(FeatureID, [FeatureName], Acc)}
     %% end,
-    do_build_schema(AvgDepth, NextFeatures, NextRandState, NextAcc).
+    do_build_schema(Opts, NextFeatures, NextAcc).
 
 features() ->
     ?LET(
