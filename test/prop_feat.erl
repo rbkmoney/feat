@@ -18,14 +18,18 @@ prop_hash_calculatable() ->
 %% 1. prop_compare_scrambled_sets
 %% 2. Invalid schema (e.g. #{0 => [<<"0">>],1 => [<<"0">>]})
 %% 3. Speed up tests (stack for some (almost final) cases)
+%% 4. EUnit-embed for schema validation: ?FEAT_CHECK_SCHEMAS(SchemaOrSchemas) and ?assertValidFeatureSchema(Schema)
 -spec prop_read() -> proper:test().
 prop_read() ->
     ?FORALL(
         Schema,
         schema(),
         begin
+            %% io:fwrite("~p~n", [[{schema, Schema}]]),
             Entity = fill_schema(Schema),
             Features = feat:read(Schema, Entity),
+            %% io:fwrite("~p~n", [[{'entity', Entity}]]),
+            %% io:fwrite("~p~n", [[{features, Features}]]),
 
             is_map(Features) andalso
                 assert_correct_read(Schema, Features, Entity)
@@ -59,15 +63,9 @@ prop_compare_same() ->
 
             Features1 = feat:read(Schema, Entity1),
             Features2 = feat:read(Schema, Entity2),
-
-            %% logger:info("~n"),
-            %% logger:info("~p", [{schema, Schema}]),
-            %% logger:info("~p", [{paths, PathSpecs}]),
-            %% logger:info("~p", [{'entity1', Entity1}]),
-            %% logger:info("~p", [{'entity2', Entity2}]),
-            %% logger:info("~p", [{'features1', Features1}]),
-            %% logger:info("~p", [{'features2', Features2}]),
-            %% io:fwrite("~p~n", [{'diff', feat:compare(Features1, Features2)}]),
+            %% io:fwrite("~p~n", [{'features1', Features1}]),
+            %% io:fwrite("~p~n", [{'features2', Features2}]),
+            %% io:fwrite("~p~n", [{diff, feat:compare(Features1, Features2)}]),
 
             ?assertEqual(true, feat:compare(Features1, Features2)),
             true
@@ -81,30 +79,28 @@ prop_compare_different() ->
         [schema(), integer()],
         begin
             ?SET_SEED(Seed),
-
             Entity1 = fill_schema(Schema),
 
             %% TODO: move to such that
             %% ?assertNotEqual(Entity, Entity2),
-            case random_pathspecs(Schema) of
+            case random_pathspecs_for_change(Schema) of
                 [] ->
                     true;
                 PathSpecs ->
+                    %% io:fwrite("~p~n", [{schema, Schema}]),
+                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
+                    %% io:fwrite("~p~n", [{first, Entity1}]),
                     Entity2 = change_values_by_paths(PathSpecs, Entity1),
+                    %% io:fwrite("~p~n", [{second, Entity2}]),
 
                     Features1 = feat:read(Schema, Entity1),
                     Features2 = feat:read(Schema, Entity2),
 
                     {false, Diff} = feat:compare(Features1, Features2),
-
-                    %% io:fwrite("~p~n", [{schema, Schema}]),
-                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
-                    %% io:fwrite("~p~n", [{first, Entity1}]),
-                    %% io:fwrite("~p~n", [{second, Entity2}]),
                     %% io:fwrite("~p~n", [{diff, Diff}]),
 
                     is_map(Diff) andalso
-                        assert_correct_compare(Diff, PathSpecs, Entity1, Entity2)
+                        assert_correct_compare(Diff, PathSpecs)
             end
         end
     ).
@@ -115,58 +111,31 @@ prop_list_diff_fields() ->
         [Schema, Seed],
         [schema(), integer()],
         begin
-            %% Seed = 4,
-            %% Schema = #{1 => [<<"1">>],
-            %%            2 =>
-            %%                [<<"2">>,
-            %%                 {set,#{3 =>
-            %%                            [<<"3">>,
-            %%                             #{4 => [<<"4">>],
-            %%                               5 => [<<"5">>],
-            %%                               6 => [<<"6">>],
-            %%                               7 => [<<"7">>]}]}}]},
-            %% Schema = #{0 =>
-            %%                [<<"0">>,
-            %%                 #{1 => [<<"00">>],
-            %%                   2 =>
-            %%                       [<<"1">>,
-            %%                        {set,#{3 => [<<"01">>],
-            %%                               4 => [<<"3">>],
-            %%                               5 => [<<"4">>],
-            %%                               6 => [<<"5">>],
-            %%                               7 =>
-            %%                                   [<<"2">>,
-            %%                                    #{8 => [<<"6">>],
-            %%                                      9 => [<<"A">>],
-            %%                                      10 => [<<"B">>],
-            %%                                      11 => [<<"C">>]}]}}]}]} ,
-            %% Schema = #{0 => [<<48>>, {set, #{1 => [<<49>>], 2 => [<<50>>]}}]},
-            %% Seed = -7,
             ?SET_SEED(Seed),
+            %% io:fwrite("~p~n", [{schema, Schema}]),
 
             Entity1 = fill_schema(Schema),
 
             %% TODO: move to such that
             %% ?assertNotEqual(Entity, Entity2),
-            case random_pathspecs(Schema) of
+            case random_pathspecs_for_change(Schema) of
                 [] ->
                     true;
                 PathSpecs ->
+                    %% io:fwrite("~p~n", [{seed, Seed}]),
+                    %% io:fwrite("~p~n", [{first, Entity1}]),
+                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
+
                     Entity2 = change_values_by_paths(PathSpecs, Entity1),
+                    %% io:fwrite("~p~n", [{second, Entity2}]),
 
                     Features1 = feat:read(Schema, Entity1),
                     Features2 = feat:read(Schema, Entity2),
 
                     {false, Diff} = feat:compare(Features1, Features2),
+                    %% io:fwrite("~p~n", [{diff, Diff}]),
 
                     DiffFields = feat:list_diff_fields(Schema, Diff),
-
-                    %% io:fwrite("~p~n", [{seed, Seed}]),
-                    %% io:fwrite("~p~n", [{schema, Schema}]),
-                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
-                    %% io:fwrite("~p~n", [{first, Entity1}]),
-                    %% io:fwrite("~p~n", [{second, Entity2}]),
-                    %% io:fwrite("~p~n", [{diff, Diff}]),
                     %% io:fwrite("~p~n", [{diff_fields, DiffFields}]),
 
                     ChangedFields =
@@ -187,17 +156,17 @@ schema(Opts) ->
     ?LET(
         Features,
         features(),
-        build_schema(Opts, Features)
+        generate_schema(Opts, Features)
     ).
 
-build_schema(Opts, Features) ->
-    {_, SchemaAcc} = do_build_schema(Opts, Features, #{}),
+generate_schema(Opts, Features) ->
+    {_, SchemaAcc} = do_generate_schema(Opts, Features, #{}),
     SchemaAcc.
 
 %% TODO: remove RandState
-do_build_schema(_Opts, [], Acc) ->
+do_generate_schema(_Opts, [], Acc) ->
     {[], Acc};
-do_build_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
+do_generate_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
     AvgDepth = maps:get(avg_depth, Opts, 3),
 
     %% Dice: 1 means simple field, 2 ­ Union nested schema (with discriminator), >1 ­ nested schema
@@ -210,7 +179,7 @@ do_build_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
             %% SetSchema
             %% NestedSchema (inc. set)
             DiceNested > 1, DiceUnion == 1, tl(RestFeatures) /= [] ->
-                {LeftFeatures, NestedSchema} = do_build_schema(
+                {LeftFeatures, NestedSchema} = do_generate_schema(
                     Opts,
                     RestFeatures,
                     #{}
@@ -222,44 +191,55 @@ do_build_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
                         2 -> {set, NestedSchema}
                     end,
                 {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)};
-            %% %% DiscriminatedSchema
-            %% DiceNested > 1, tl(RestFeatures) /= [] ->
-            %%     {LeftFeatures, ReturnedRandState, NestedSchema} = do_build_schema(
-            %%                                                         AvgDepth,
-            %%                                                         RestFeatures,
-            %%                                                         NewRandState,
-            %%                                                         #{}
-            %%                                                        ),
-            %%     {LeftFeatures, ReturnedRandState, maps:put(FeatureID, [FeatureName, NestedSchema], Acc)};
-            %% DiceValueKind == 2 ->
-            %%     {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)};
+            %% DiscriminatedSchema aka union
+            DiceNested > 1, DiceUnion == 2, tl(RestFeatures) /= [] ->
+                MaxUnionWidth = min(
+                    maps:get(max_union_width, Opts, 3),
+                    length(RestFeatures)
+                ),
+                UnionWidth = rand(MaxUnionWidth),
+
+                {UnionElementsFeatures, RestFeatures1} = lists:split(UnionWidth, RestFeatures),
+
+                MaxUnionElements = maps:get(max_union_elements, Opts, 7),
+
+                %% TODO: Can't features be reused across union elements? Or it's schema error (check during tests)
+                {UnionSchema, NextRestFeatures} =
+                    lists:foldl(
+                        fun({ElementFeatureID, _ElementFeatureName}, {UnionAcc, CurrentRestFeatures}) ->
+                            MaxNestedFeaturesCount = rand(min(MaxUnionElements, length(CurrentRestFeatures))),
+
+                            {UsedNestedFeatures, NextRestFeatures} =
+                                lists:split(rand(MaxNestedFeaturesCount), CurrentRestFeatures),
+
+                            {_, NestedSchema} =
+                                do_generate_schema(
+                                    Opts,
+                                    UsedNestedFeatures,
+                                    #{}
+                                ),
+
+                            %% TODO: is it valid schema
+                            NextUnionAcc =
+                                case map_size(NestedSchema) of
+                                    0 -> UnionAcc;
+                                    _ -> maps:put(ElementFeatureID, NestedSchema, UnionAcc)
+                                end,
+
+                            {NextUnionAcc, NextRestFeatures}
+                        end,
+                        {#{
+                                ?discriminator => [FeatureName]
+                            },
+                            RestFeatures1},
+                        UnionElementsFeatures
+                    ),
+
+                {NextRestFeatures, maps:put(FeatureID, [FeatureName, UnionSchema], Acc)};
             true ->
                 {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)}
         end,
-    %% case {DiceNested, DiceUnion, RestFeatures} of
-    %%     %% Simple nested schema
-    %%     {DiceNested, 1, [_ | _]} when DiceNested > 1 ->
-    %%         {LeftFeatures, ReturnedRandState, NestedSchema} = do_build_schema(
-    %%             AvgDepth,
-    %%             RestFeatures,
-    %%             NewRandState,
-    %%             #{}
-    %%         ),
-    %%         {LeftFeatures, ReturnedRandState, maps:put(FeatureID, [FeatureName, NestedSchema], Acc)};
-    %%     %% Schema with discriminator (union)
-    %%     %% TODO: add discriminator
-    %%     {DiceNested, 2, [_ | _]} when DiceNested > 1 ->
-    %%         {LeftFeatures, ReturnedRandState, NestedSchema} = do_build_schema(
-    %%             AvgDepth,
-    %%             RestFeatures,
-    %%             NewRandState,
-    %%             #{}
-    %%         ),
-    %%         {LeftFeatures, ReturnedRandState, maps:put(FeatureID, [FeatureName, NestedSchema], Acc)};
-    %%     _ ->
-    %%         {RestFeatures, NewRandState, maps:put(FeatureID, [FeatureName], Acc)}
-    %% end,
-    do_build_schema(Opts, NextFeatures, NextAcc).
+    do_generate_schema(Opts, NextFeatures, NextAcc).
 
 features() ->
     ?LET(
@@ -357,7 +337,27 @@ fill_schema(Schema) ->
                         {error, map_overwrite} -> Acc
                     end,
                 {no_traverse, NextAcc};
-            (_, Acc, _) ->
+            ({union, DiscriminatorName, UnionSchema}, Acc, RevPath) ->
+                UnionElement =
+                    case maps:to_list(UnionSchema) of
+                        [] ->
+                            #{};
+                        UnionElementsSchemas ->
+                            {_Idx, UnionElementSchema} = rand_elem(UnionElementsSchemas),
+                            fill_schema(UnionElementSchema)
+                    end,
+
+                DiscriminatorValue = generate_unique_binary(),
+                Value = maps:put(DiscriminatorName, DiscriminatorValue, UnionElement),
+
+                NamePath = name_path(lists:reverse(RevPath)),
+                NextAcc =
+                    case deep_force_put(NamePath, Value, Acc) of
+                        {ok, NewAcc} -> NewAcc;
+                        {error, map_overwrite} -> Acc
+                    end,
+                NextAcc;
+            (_, Acc, _RevPath) ->
                 Acc
         end,
         #{},
@@ -370,26 +370,6 @@ assert_correct_read(Schema, Features, Entity) ->
     %% io:fwrite("~p~n", [{entity, Entity}]),
     traverse_schema(
         fun
-            %%    TODO: only discriminator here
-            %% ({nested, NestedSchema}, true, [{Id, Name} | _] = RevPath) ->
-            %%     case maps:find(Id, Features) of
-            %%         error ->
-            %%             case maps:find(Name) of
-            %%                 {ok, _Value} ->
-            %%                     throw({feature_unused, Name});
-            %%                 error ->
-            %%                     true
-            %%             end;
-            %%         {ok, undefined} ->
-            %%             throw({no_nested_features, lists:reverse(RevPath)});
-            %%         {ok, NotMap} when not is_map(NotMap) ->
-            %%             throw({single_feature, lists:reverse(RevPath)});
-            %%         {ok, NestedFeatures} ->
-            %%             NestedEntity =
-            %%                 deep_fetch(Entity, name_path(lists:reverse(RevPath))),
-            %%             assert_correct_read(NestedSchema, NestedFeatures, NestedEntity)
-            %%     end;
-            %%
             (_, false, _) ->
                 false;
             ({nested, _}, Acc, _) ->
@@ -407,8 +387,8 @@ assert_correct_read(Schema, Features, Entity) ->
                             throw({feature_unused, Path, Entity, Features, Schema});
                         {{ok, _}, {error, not_found, _}} ->
                             throw({unknown_feature, Path, Entity, Features, Schema});
-                        {{ok, Map}, {ok, _}} when is_map(Map) ->
-                            throw({nested_features, Path});
+                        {{ok, FoundFeatures}, {ok, FoundEntities}} when is_map(FoundFeatures) ->
+                            {nested, FoundFeatures, FoundEntities};
                         {{ok, FeatureValue}, {ok, EntityValue}} ->
                             {ok, FeatureValue, EntityValue};
                         {{error, not_map, ErrorPath}, _} ->
@@ -422,6 +402,9 @@ assert_correct_read(Schema, Features, Entity) ->
                     {value, {ok, FeatureHash, Value}} ->
                         ?assertEqual(FeatureHash, feat:hash(Value)),
                         true;
+                    {{set, _NestedSchema}, {ok, undefined, _NestedValues}} ->
+                        %% Inside recursive union comparison: there's a field with the same noun
+                        false;
                     {{set, NestedSchema}, {ok, NestedFeatureSet, NestedValues}} ->
                         %% io:fwrite("~p~n", [{set, NestedSchema, NestedFeatureSet, NestedValues}]),
                         NestedFeatures = lists:map(fun([_Index, Feats]) -> Feats end, NestedFeatureSet),
@@ -437,19 +420,59 @@ assert_correct_read(Schema, Features, Entity) ->
                                 true,
                                 lists:zip(NestedFeatures, NestedEntities)
                             ),
-                        {no_traverse, Result}
+                        {no_traverse, Result};
+                    {{union, _DiscriminatorName, _UnionSchema}, {ok, undefined, _NestedValues}} ->
+                        %% Inside recursive union comparison: there's a field with the same noun
+                        false;
+                    {{union, DiscriminatorName, UnionSchema}, {nested, NestedFeatures, NestedValues}} ->
+                        DiscriminatorResult =
+                            maps:get(?discriminator, NestedFeatures) ==
+                                feat:hash(maps:get(DiscriminatorName, NestedValues)),
+
+                        OkUnionElementsCount =
+                            maps:fold(
+                                fun(Idx, UnionElementSchema, Acc) ->
+                                    UnionElementFeatures =
+                                        maps:get(Idx, NestedFeatures),
+
+                                    try
+                                        assert_correct_read(
+                                            UnionElementSchema,
+                                            UnionElementFeatures,
+                                            NestedValues
+                                        )
+                                    of
+                                        false -> Acc;
+                                        true -> Acc + 1
+                                    catch
+                                        %% Union element miss
+                                        throw:UnknownFeature when element(1, UnknownFeature) == unknown_feature ->
+                                            Acc;
+                                        %% 2+ union elements with different structure and same nouns
+                                        throw:FeatureNotMap when element(1, FeatureNotMap) == feature_not_map ->
+                                            Acc
+                                    end
+                                end,
+                                0,
+                                UnionSchema
+                            ),
+                        UnionWidth = map_size(UnionSchema),
+                        UnionElementsResult = (OkUnionElementsCount > 0) or (UnionWidth == 0),
+
+                        DiscriminatorResult and UnionElementsResult;
+                    {_, {nested, _, _}} ->
+                        throw({nested_features, Path})
                 end
         end,
         true,
         Schema
     ).
 
-assert_correct_compare(Diff, Paths, Entity1, Entity2) ->
-    do_assert_correct_compare(Diff, Paths, Entity1, Entity2, []).
+assert_correct_compare(Diff, Paths) ->
+    do_assert_correct_compare(Diff, Paths, []).
 
 %% TODO: check that all paths are different?
-%% do_assert_correct_compare(-1, Paths, Entity1, Entity2, _RevPath) when Paths /= [] -> true;
-do_assert_correct_compare(Diff, Paths, Entity1, Entity2, RevPath) ->
+do_assert_correct_compare(Diff, Paths, RevPath) ->
     lists:foldl(
         fun
             (_, false) ->
@@ -465,7 +488,7 @@ do_assert_correct_compare(Diff, Paths, Entity1, Entity2, RevPath) ->
                 NewRevPath = [{Id, Name} | RevPath],
                 case maps:find(Id, Diff) of
                     {ok, NestedDiff} when is_map(NestedDiff) ->
-                        do_assert_correct_compare(NestedDiff, NestedPaths, Entity1, Entity2, NewRevPath);
+                        do_assert_correct_compare(NestedDiff, NestedPaths, NewRevPath);
                     error ->
                         logger:error("Nested diff is not found at ~p for subschema: ~p~n", [
                             lists:reverse(NewRevPath),
@@ -489,8 +512,6 @@ do_assert_correct_compare(Diff, Paths, Entity1, Entity2, RevPath) ->
                                     Result = do_assert_correct_compare(
                                         NestedDiff,
                                         NestedPaths,
-                                        Entity1,
-                                        Entity2,
                                         NextRevPath
                                     ),
                                     case Result of
@@ -508,6 +529,55 @@ do_assert_correct_compare(Diff, Paths, Entity1, Entity2, RevPath) ->
                         logger:error("Set diff is not found at ~p for subschema: ~p~n", [
                             lists:reverse(NewRevPath),
                             NestedSchema
+                        ]),
+                        false
+                end;
+            ({union, Id, Name, DiscriminatorName, ElementPathSpecs, UnionSchema}, _) ->
+                NewRevPath = [{Id, Name} | RevPath],
+                case maps:find(Id, Diff) of
+                    {ok, ?difference} when DiscriminatorName /= undefined ->
+                        true;
+                    {ok, ?difference} ->
+                        logger:error(
+                            "Union diff at ~p shows total diff for unchanged discriminator: ~p~n",
+                            [
+                                lists:reverse(NewRevPath),
+                                UnionSchema
+                            ]
+                        ),
+                        false;
+                    {ok, NestedDiff} ->
+                        lists:foldl(
+                            fun
+                                (_, false) ->
+                                    false;
+                                ({Idx, PathSpec}, true) ->
+                                    case maps:find(Idx, NestedDiff) of
+                                        {ok, UnionElementDiff} ->
+                                            do_assert_correct_compare(
+                                                UnionElementDiff,
+                                                PathSpec,
+                                                [{Idx, union} | NewRevPath]
+                                            );
+                                        error ->
+                                            logger:error(
+                                                "Expected union element ~p at ~p is not found in diff ~p: ~p~n",
+                                                [
+                                                    Idx,
+                                                    lists:reverse(NewRevPath),
+                                                    NestedDiff,
+                                                    UnionSchema
+                                                ]
+                                            )
+                                    end
+                            end,
+                            true,
+                            ElementPathSpecs
+                        );
+                    error ->
+                        logger:error("Union diff is not found at ~p for subschema: ~p~n", [
+                            lists:reverse(NewRevPath),
+                            UnionSchema
                         ]),
                         false
                 end
@@ -530,12 +600,23 @@ pathspecs(Schema) ->
                 NestedPaths = pathspecs(NestedSchema),
                 Element = {set, Id, Name, NestedPaths, NestedSchema},
                 NewAcc = [Element | Acc],
-                {no_traverse, NewAcc}
+                {no_traverse, NewAcc};
+            ({union, DiscriminatorName, UnionSchema}, Acc, [{Id, Name} | _]) ->
+                ElementPathSpecs =
+                    maps:to_list(
+                        maps:map(
+                            fun(_ElementId, NestedSchema) -> pathspecs(NestedSchema) end,
+                            UnionSchema
+                        )
+                    ),
+
+                Element = {union, Id, Name, DiscriminatorName, ElementPathSpecs, UnionSchema},
+                [Element | Acc]
         end,
         [],
         Schema
     ).
-random_pathspecs(Schema) ->
+random_pathspecs_for_change(Schema) ->
     traverse_schema(
         fun
             (value, Acc, [{Id, Name} | _]) ->
@@ -547,7 +628,7 @@ random_pathspecs(Schema) ->
                 end;
             ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
                 NewAcc =
-                    case random_pathspecs(NestedSchema) of
+                    case random_pathspecs_for_change(NestedSchema) of
                         [] ->
                             Acc;
                         NestedPaths ->
@@ -562,13 +643,37 @@ random_pathspecs(Schema) ->
                 NewAcc =
                     case rand:uniform(2) of
                         1 ->
-                            NestedPaths = random_pathspecs(NestedSchema),
+                            NestedPaths = random_pathspecs_for_change(NestedSchema),
                             Element = {set, Id, Name, NestedPaths, NestedSchema},
                             [Element | Acc];
                         2 ->
                             Acc
                     end,
-                {no_traverse, NewAcc}
+                {no_traverse, NewAcc};
+            ({union, DiscriminatorName, UnionSchema}, Acc, [{Id, Name} | _]) ->
+                ElementPathSpecs =
+                    lists:flatmap(
+                        fun({ElementId, NestedSchema}) ->
+                            case dice(2) of
+                                false -> [];
+                                true -> [{ElementId, random_pathspecs_for_change(NestedSchema)}]
+                            end
+                        end,
+                        maps:to_list(UnionSchema)
+                    ),
+                %% Should Discriminator value be changed
+                DiscriminatorNamePath =
+                    case dice(2) of
+                        true -> DiscriminatorName;
+                        false -> undefined
+                    end,
+
+                PrependElements =
+                    case DiscriminatorNamePath == undefined orelse ElementPathSpecs == [] of
+                        true -> [];
+                        false -> [{union, Id, Name, DiscriminatorNamePath, ElementPathSpecs, UnionSchema}]
+                    end,
+                PrependElements ++ Acc
         end,
         [],
         Schema
@@ -577,9 +682,14 @@ random_pathspecs(Schema) ->
 random_nonexistent_pathspecs(Schema) ->
     traverse_schema(
         fun
-            ({set, _Nested}, Acc, _RevPath) ->
-                %% Can't create nonexistent paths for sets
-                {no_traverse, Acc};
+            (value, Acc, [{Id, _Name} | _]) ->
+                case rand:uniform(2) of
+                    1 ->
+                        Name = generate_unique_binary(),
+                        [{value, Id, Name} | Acc];
+                    2 ->
+                        Acc
+                end;
             ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
                 NewAcc =
                     case random_nonexistent_pathspecs(NestedSchema) of
@@ -590,16 +700,30 @@ random_nonexistent_pathspecs(Schema) ->
                             [Element | Acc]
                     end,
                 {no_traverse, NewAcc};
-            (value, Acc, [{Id, _Name} | _]) ->
-                case rand:uniform(2) of
-                    1 ->
-                        Name = generate_unique_binary(),
-                        [{value, Id, Name} | Acc];
-                    2 ->
-                        Acc
-                end;
-            (_, Acc, _) ->
-                Acc
+            ({set, _Nested}, Acc, _RevPath) ->
+                %% Can't create nonexistent paths for sets
+                {no_traverse, Acc};
+            ({union, _DiscriminatorName, UnionSchema}, Acc, [{Id, Name} | _]) ->
+                ElementPathSpecs =
+                    lists:flatmap(
+                        fun({Idx, UnionElementSchema}) ->
+                            case dice(2) of
+                                true ->
+                                    [{Idx, random_nonexistent_pathspecs(UnionElementSchema)}];
+                                false ->
+                                    []
+                            end
+                        end,
+                        maps:to_list(UnionSchema)
+                    ),
+
+                case ElementPathSpecs of
+                    [] ->
+                        Acc;
+                    _ ->
+                        Element = {union, Id, Name, undefined, ElementPathSpecs, UnionSchema},
+                        [Element | Acc]
+                end
         end,
         [],
         Schema
@@ -608,8 +732,11 @@ random_nonexistent_pathspecs(Schema) ->
 change_values_by_paths(Paths, Entity) ->
     lists:foldl(
         fun
+            ({value, _Id, Name}, EntityAcc) ->
+                NewValue = generate_unique_binary(),
+                maps:put(Name, NewValue, EntityAcc);
             ({nested, _Id, Name, NestedPaths, _NestedSchema}, EntityAcc) ->
-                maps:update_with(
+                maps_update_existing_with(
                     Name,
                     fun(NestedEntity) ->
                         NewNestedEntity = change_values_by_paths(NestedPaths, NestedEntity),
@@ -619,16 +746,48 @@ change_values_by_paths(Paths, Entity) ->
                     EntityAcc
                 );
             ({set, _Id, Name, NestedPaths, NestedSchema}, EntityAcc) ->
-                maps:update_with(
+                maps_update_existing_with(
                     Name,
                     fun(EntityList) ->
                         change_entity_set(EntityList, NestedPaths, NestedSchema)
                     end,
                     EntityAcc
                 );
-            ({value, _Id, Name}, EntityAcc) ->
-                NewValue = generate_unique_binary(),
-                maps:put(Name, NewValue, EntityAcc)
+            ({union, _Id, Name, DiscriminatorName, ElementPathSpecs, _UnionSchema}, EntityAcc) ->
+                UnionEntity =
+                    case maps:find(Name, EntityAcc) of
+                        error when DiscriminatorName == undefined ->
+                            undefined;
+                        error ->
+                            #{};
+                        {ok, Value} ->
+                            Value
+                    end,
+
+                case UnionEntity == undefined of
+                    true ->
+                        EntityAcc;
+                    false ->
+                        MaybeChangedUnionEntity =
+                            case DiscriminatorName == undefined of
+                                true ->
+                                    UnionEntity;
+                                false ->
+                                    NewDiscriminatorValue = generate_unique_binary(),
+                                    maps:put(DiscriminatorName, NewDiscriminatorValue, UnionEntity)
+                            end,
+
+                        NewUnionEntity =
+                            lists:foldl(
+                                fun({_UnionId, PathSpecs}, UnionEntityAcc) ->
+                                    change_values_by_paths(PathSpecs, UnionEntityAcc)
+                                end,
+                                MaybeChangedUnionEntity,
+                                ElementPathSpecs
+                            ),
+
+                        maps:put(Name, NewUnionEntity, EntityAcc)
+                end
         end,
         Entity,
         Paths
@@ -669,8 +828,7 @@ set_maybe_permute(Entities) ->
             Entities;
         2 ->
             %% io:fwrite("~p~n", ["Permute"]),
-            Length = length(Entities),
-            order_by(fun(_Element) -> rand:uniform(Length + 1) end, Entities)
+            scramble(Entities)
     end.
 set_maybe_remove(Entities) ->
     case rand:uniform(2) of
@@ -718,6 +876,26 @@ set_maybe_add(Entities, Schema) ->
                 Entities
             )
     end.
+
+maps_update_existing_with(Key, Fun, Map) ->
+    case maps:find(Key, Map) of
+        {ok, Value} ->
+            maps:put(Key, Fun(Value), Map);
+        error ->
+            Map
+    end.
+
+rand_elem(List) when List /= [] ->
+    lists:nth(rand:uniform(length(List)), List).
+
+dice(Chance) ->
+    Chance == rand:uniform(Chance).
+
+rand(Limit) ->
+    rand:uniform(Limit + 1) - 1.
+
+scramble(List) ->
+    order_by(fun(_Elt) -> rand:uniform() end, List).
 
 order_by(Fun, Elements) ->
     lists:map(
@@ -808,7 +986,7 @@ pathspecs_to_binpaths(PathSpecs, Diff) ->
 
 do_pathspec_to_binpath({value, Id, Name}, Diff) ->
     case maps:get(Id, Diff, undefined) of
-        -1 -> [[Name]];
+        ?difference -> [[Name]];
         undefined -> []
     end;
 do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
@@ -826,11 +1004,11 @@ do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
     );
 %% TODO: wtf is this? rewrite
 do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
-    PathSpecs = pathspecs(NestedSchema),
     case maps:get(Id, Diff) of
-        -1 ->
+        ?difference ->
             [[Name]];
         SetDiff ->
+            PathSpecs = pathspecs(NestedSchema),
             %% For each element of set
             lists:flatmap(
                 fun({Index, NestedDiff}) ->
@@ -850,6 +1028,22 @@ do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
                 end,
                 maps:to_list(SetDiff)
             )
+    end;
+do_pathspec_to_binpath({union, Id, Name, _DiscriminatorName, ElementPathSpecs, _UnionSchema}, Diff) ->
+    case maps:get(Id, Diff) of
+        ?difference ->
+            [[Name]];
+        UnionDiff ->
+            lists:flatmap(
+                fun({ElementId, ElementSchema}) ->
+                    ElementDiff = maps:get(ElementId, UnionDiff),
+                    lists:map(
+                        fun(NextPath) -> [Name, NextPath] end,
+                        do_pathspec_to_binpath(ElementSchema, ElementDiff)
+                    )
+                end,
+                maps:to_list(ElementPathSpecs)
+            )
     end.
 
 traverse_schema(Fun, Acc, Schema) ->
@@ -859,6 +1053,13 @@ traverse_schema(Fun, Acc, Schema) ->
 do_traverse_schema(Fun, Acc, Schema, InitRevPath) ->
     maps:fold(
         fun
+            (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], {CurrentAcc, RevPath}) ->
+                NewAcc = Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [
+                    {Id, Name}
+                    | RevPath
+                ]),
+                %% TODO: no_traverse here?
+                {NewAcc, RevPath};
             (Id, [Name, Value], {CurrentAcc, RevPath}) ->
                 NewRevPath = [{Id, Name} | RevPath],
                 Arg =
