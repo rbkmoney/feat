@@ -10,11 +10,14 @@
 -define(RAND_ALG, exsss).
 -define(SET_SEED(Seed), _ = rand:seed(?RAND_ALG, Seed)).
 
+-define(NON_EMPTY(Spec), ?SUCHTHAT(X, Spec, X /= [])).
+
 -spec prop_hash_calculatable() -> proper:test().
 prop_hash_calculatable() ->
     ?FORALL(Term, term(), is_integer(feat:hash(Term))).
 
 %% TODO:
+%% 0. Redo all rand and dice with proper calls: is it possible?
 %% 1. prop_compare_scrambled_sets
 %% 2. prop_compare_different_sets (change, delete, add)
 %% 2. Invalid schema (e.g. #{0 => [<<"0">>],1 => [<<"0">>]})
@@ -23,77 +26,63 @@ prop_hash_calculatable() ->
 -spec prop_read() -> proper:test().
 prop_read() ->
     ?FORALL(
-        Schema,
-        schema(),
-        begin
-            %% io:fwrite("~p~n", [[{schema, Schema}]]),
-            Entity = fill_schema(Schema),
-            Features = feat:read(Schema, Entity),
-            %% io:fwrite("~p~n", [[{'entity', Entity}]]),
-            %% io:fwrite("~p~n", [[{features, Features}]]),
-
-            is_map(Features) andalso
-                assert_correct_read(Schema, Features, Entity)
-        end
+        [Schema, _],
+        [schema(), set_seed()],
+        ?FORALL(
+            Entity,
+            entity(Schema),
+            begin
+                Features = feat:read(Schema, Entity),
+                is_map(Features) andalso
+                    assert_correct_read(Schema, Features, Entity)
+            end
+        )
     ).
 
 -spec prop_compare_same() -> proper:test().
 prop_compare_same() ->
     ?FORALL(
         [
-            Schema,
-            Seed
+            Schema
         ],
         [
-            schema(),
-            integer()
+            schema()
         ],
         begin
-            ?SET_SEED(Seed),
+            io:fwrite("~p~n", [Schema]),
+            ?FORALL(
+                [_, Entity1, PathSpecs],
+                [set_seed(), fill_schema(Schema), random_nonexistent_pathspecs(Schema)],
+                ?FORALL(
+                    Entity2,
+                    change_values_by_paths(PathSpecs, Entity1),
+                    begin
+                        Features1 = feat:read(Schema, Entity1),
+                        Features2 = feat:read(Schema, Entity2),
 
-            Entity1 = fill_schema(Schema),
-            PathSpecs = random_nonexistent_pathspecs(Schema),
-            %% io:fwrite("~p~n", ["~n"]),
-            %% io:fwrite("~p~n", [[{schema, Schema}]]),
-            %% io:fwrite("~p~n", [[{paths, PathSpecs}]]),
-            %% io:fwrite("~p~n", [[{'entity1', Entity1}]]),
+                        %% io:fwrite("~p~n", [{'features1', Features1}]),
+                        %% io:fwrite("~p~n", [{'features2', Features2}]),
+                        %% io:fwrite("~p~n", [{diff, feat:compare(Features1, Features2)}]),
 
-            Entity2 = change_values_by_paths(PathSpecs, Entity1),
-
-            %% io:fwrite("~p~n", [[{'entity2', Entity2}]]),
-
-            Features1 = feat:read(Schema, Entity1),
-            Features2 = feat:read(Schema, Entity2),
-            %% io:fwrite("~p~n", [{'features1', Features1}]),
-            %% io:fwrite("~p~n", [{'features2', Features2}]),
-            %% io:fwrite("~p~n", [{diff, feat:compare(Features1, Features2)}]),
-
-            ?assertEqual(true, feat:compare(Features1, Features2)),
-            true
+                        true == feat:compare(Features1, Features2)
+                    end
+                )
+            )
         end
     ).
 
 -spec prop_compare_different() -> proper:test().
 prop_compare_different() ->
     ?FORALL(
-        [Schema, Seed],
-        [schema(), integer()],
-        begin
-            ?SET_SEED(Seed),
-            Entity1 = fill_schema(Schema),
-
-            %% TODO: move to such that
-            %% ?assertNotEqual(Entity, Entity2),
-            case random_pathspecs_for_change(Schema) of
-                [] ->
-                    true;
-                PathSpecs ->
-                    %% io:fwrite("~p~n", [{schema, Schema}]),
-                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
-                    %% io:fwrite("~p~n", [{first, Entity1}]),
-                    Entity2 = change_values_by_paths(PathSpecs, Entity1),
-                    %% io:fwrite("~p~n", [{second, Entity2}]),
-
+        [Schema, _],
+        [schema(), set_seed()],
+        ?FORALL(
+            [Entity1, PathSpecs],
+            [fill_schema(Schema), random_pathspecs_for_change(Schema)],
+            ?FORALL(
+                Entity2,
+                change_values_by_paths(PathSpecs, Entity1),
+                begin
                     Features1 = feat:read(Schema, Entity1),
                     Features2 = feat:read(Schema, Entity2),
 
@@ -102,54 +91,59 @@ prop_compare_different() ->
 
                     is_map(Diff) andalso
                         assert_correct_compare(Diff, PathSpecs)
-            end
-        end
+                end
+            )
+        )
     ).
 
 -spec prop_list_diff_fields() -> proper:test().
 prop_list_diff_fields() ->
     ?FORALL(
-        [Schema, Seed],
-        [schema(), integer()],
-        begin
-            ?SET_SEED(Seed),
-            %% io:fwrite("~p~n", [{seed, Seed}]),
-            %% io:fwrite("~p~n", [{schema, Schema}]),
-
-            Entity1 = fill_schema(Schema),
-
-            %% TODO: move to such that
-            %% ?assertNotEqual(Entity, Entity2),
-            case random_pathspecs_for_change(Schema) of
-                [] ->
-                    true;
-                PathSpecs ->
-                    %% io:fwrite("~p~n", [{first, Entity1}]),
-                    %% io:fwrite("~p~n", [{paths, PathSpecs}]),
-
-                    Entity2 = change_values_by_paths(PathSpecs, Entity1),
-                    %% io:fwrite("~p~n", [{second, Entity2}]),
-
+        [Schema, _],
+        [schema(), set_seed()],
+        ?FORALL(
+            [Entity1, PathSpecs],
+            [fill_schema(Schema), random_pathspecs_for_change(Schema)],
+            ?FORALL(
+                Entity2,
+                change_values_by_paths(PathSpecs, Entity1),
+                begin
                     Features1 = feat:read(Schema, Entity1),
                     Features2 = feat:read(Schema, Entity2),
 
-                    {false, Diff} = feat:compare(Features1, Features2),
-                    %% io:fwrite("~p~n", [{diff, Diff}]),
+                    case feat:compare(Features1, Features2) of
+                        true ->
+                            true;
+                        {false, Diff} ->
+                            %% io:fwrite("~p~n", [{diff, Diff}]),
 
-                    DiffFields = feat:list_diff_fields(Schema, Diff),
-                    %% io:fwrite("~p~n", [{diff_fields, DiffFields}]),
+                            DiffFields = feat:list_diff_fields(Schema, Diff),
+                            %% io:fwrite("~p~n", [{diff_fields, DiffFields}]),
 
-                    ChangedFields =
-                        pathspecs_to_binpaths(PathSpecs, Diff),
+                            ChangedFields =
+                                pathspecs_to_binpaths(PathSpecs, Diff),
 
-                    %% io:fwrite("~p~n", [{fields, ChangedFields}]),
+                            %% io:fwrite("~p~n", [{fields, ChangedFields}]),
 
-                    is_map(Diff) andalso
-                        assertEqualSets(ChangedFields, DiffFields)
-            end
+                            is_map(Diff) andalso
+                                assertEqualSets(ChangedFields, DiffFields)
+                    end
+                end
+            )
+        )
+    ).
+
+set_seed() ->
+    ?LET(
+        Seed,
+        integer(),
+        begin
+            rand:seed(exsss, Seed),
+            Seed
         end
     ).
 
+%% TODO: make it sized
 schema() ->
     schema(#{avg_depth => 3}).
 
@@ -157,14 +151,19 @@ schema(Opts) ->
     ?LET(
         Features,
         features(),
-        generate_schema(Opts, Features)
+        case generate_schema(Opts, Features) of
+            Empty when map_size(Empty) == 0 ->
+                schema(Opts);
+            Schema ->
+                Schema
+        end
     ).
 
 generate_schema(Opts, Features) ->
     {_, SchemaAcc} = do_generate_schema(Opts, Features, #{}),
     SchemaAcc.
 
-%% TODO: remove RandState
+%% TODO: opts: empty_unions, etc.
 do_generate_schema(_Opts, [], Acc) ->
     {[], Acc};
 do_generate_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
@@ -194,7 +193,7 @@ do_generate_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
                     end,
                 {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)};
             %% DiscriminatedSchema aka Union
-            DiceNested, DiceUnion, FeaturesLeft ->
+            DiceNested, DiceUnion, tl(RestFeatures) /= [] ->
                 [{_, DiscriminatorName} | RestFeatures1] = RestFeatures,
                 MaxUnionWidth = min(
                     maps:get(max_union_width, Opts, 3),
@@ -311,6 +310,9 @@ alphanum_char() ->
 %%         Width,
 %%         Map
 %%     ).
+
+entity(Schema) ->
+    fill_schema(Schema).
 
 fill_schema(Schema) ->
     traverse_schema(
@@ -697,19 +699,28 @@ random_pathspecs_for_change(Schema) ->
     ).
 
 random_nonexistent_pathspecs(Schema) ->
+    %% TODO: add fields to root of schema
+    case do_random_nonexistent_pathspecs(Schema) of
+        [] ->
+            random_nonexistent_pathspecs(Schema);
+        PathSpecs ->
+            PathSpecs
+    end.
+do_random_nonexistent_pathspecs(Schema) ->
+    %% TODO: base on rand number up to schema complexity: total number of nodes and leafs
     traverse_schema(
         fun
             (value, Acc, [{Id, _Name} | _]) ->
-                case rand:uniform(2) of
-                    1 ->
+                case dice(2) of
+                    true ->
                         Name = generate_unique_binary(),
                         [{value, Id, Name} | Acc];
-                    2 ->
+                    false ->
                         Acc
                 end;
             ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
                 NewAcc =
-                    case random_nonexistent_pathspecs(NestedSchema) of
+                    case do_random_nonexistent_pathspecs(NestedSchema) of
                         [] ->
                             Acc;
                         NestedPaths ->
@@ -718,7 +729,7 @@ random_nonexistent_pathspecs(Schema) ->
                     end,
                 {no_traverse, NewAcc};
             ({set, _Nested}, Acc, _RevPath) ->
-                %% Can't create nonexistent paths for sets
+                %% Can't create nonexistent paths for sets: changes natural order of elements => changes them
                 {no_traverse, Acc};
             ({union, _DiscriminatorName, UnionSchema}, Acc, [{Id, Name} | _]) ->
                 ElementPathSpecs =
@@ -726,7 +737,7 @@ random_nonexistent_pathspecs(Schema) ->
                         fun({Idx, UnionElementSchema}) ->
                             case dice(2) of
                                 true ->
-                                    [{Idx, random_nonexistent_pathspecs(UnionElementSchema)}];
+                                    [{Idx, do_random_nonexistent_pathspecs(UnionElementSchema)}];
                                 false ->
                                     []
                             end
