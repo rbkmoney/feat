@@ -107,7 +107,7 @@ prop_compare_different() ->
     ).
 
 -spec prop_list_diff_fields() -> proper:test().
- prop_list_diff_fields() ->
+prop_list_diff_fields() ->
     ?FORALL(
         [Schema, Seed],
         [schema(), integer()],
@@ -193,7 +193,6 @@ do_generate_schema(Opts, [{FeatureID, FeatureName} | RestFeatures], Acc) ->
                         2 -> {set, NestedSchema}
                     end,
                 {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)};
-
             %% DiscriminatedSchema aka Union
             DiceNested, DiceUnion, FeaturesLeft ->
                 [{_, DiscriminatorName} | RestFeatures1] = RestFeatures,
@@ -657,7 +656,8 @@ random_pathspecs_for_change(Schema) ->
                         1 ->
                             %% io:fwrite("~p~n", [{nested_schema, NestedSchema}]),
                             case random_pathspecs_for_change(NestedSchema) of
-                                [] -> Acc;
+                                [] ->
+                                    Acc;
                                 NestedPaths ->
                                     %% io:fwrite("~p~n", [{nested, NestedPaths}]),
                                     Element = {set, Id, Name, NestedPaths, NestedSchema},
@@ -1015,16 +1015,16 @@ do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
             [[Name]];
         NestedDiff ->
             lists:flatmap(
-              fun(PathSpec) ->
-                      lists:map(
+                fun(PathSpec) ->
+                    lists:map(
                         fun(NextPath) ->
-                                [Name | NextPath]
+                            [Name | NextPath]
                         end,
                         do_pathspec_to_binpath(PathSpec, NestedDiff)
-                       )
-              end,
-              NestedPaths
-             )
+                    )
+                end,
+                NestedPaths
+            )
     end;
 %% TODO: wtf is this? rewrite
 do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
@@ -1043,30 +1043,31 @@ do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
                         %% BUG: Natural reordering due to changes to multiple fields is not taken into account
                         %%
                         lists:flatmap(
-                          fun(PathSpec) ->
-                                  lists:map(
+                            fun(PathSpec) ->
+                                lists:map(
                                     fun(NextPath) ->
-                                            [Name, erlang:integer_to_binary(Index) | NextPath]
+                                        [Name, erlang:integer_to_binary(Index) | NextPath]
                                     end,
                                     do_pathspec_to_binpath(PathSpec, NestedDiff)
-                                   )
-                          end,
-                          pathspecs(NestedSchema))
-                        %% lists:flatmap(
-                        %%   fun(PathSpec) ->
-                        %%           %% Build binpath segments for the paths
-                        %%           lists:map(
-                        %%             fun(NextPath) ->
-                        %%                     [Name, erlang:integer_to_binary(Index) | NextPath]
-                        %%             end,
-                        %%             do_pathspec_to_binpath(PathSpec, NestedDiff)
-                        %%            )
-                        %%   end,
-                        %%   NestedPaths
-                        %%  )
+                                )
+                            end,
+                            pathspecs(NestedSchema)
+                        )
+                    %% lists:flatmap(
+                    %%   fun(PathSpec) ->
+                    %%           %% Build binpath segments for the paths
+                    %%           lists:map(
+                    %%             fun(NextPath) ->
+                    %%                     [Name, erlang:integer_to_binary(Index) | NextPath]
+                    %%             end,
+                    %%             do_pathspec_to_binpath(PathSpec, NestedDiff)
+                    %%            )
+                    %%   end,
+                    %%   NestedPaths
+                    %%  )
                 end,
-              maps:to_list(SetDiff)
-             )
+                maps:to_list(SetDiff)
+            )
     end;
 do_pathspec_to_binpath({union, Id, Name, _DiscriminatorName, ElementPathSpecs, _UnionSchema}, Diff) ->
     case maps:find(Id, Diff) of
@@ -1077,15 +1078,15 @@ do_pathspec_to_binpath({union, Id, Name, _DiscriminatorName, ElementPathSpecs, _
         {ok, UnionDiff} ->
             lists:flatmap(
                 fun({ElementId, ElementSchema}) ->
-                        case maps:get(ElementId, UnionDiff) of
-                            ?difference ->
-                                [[]];
-                            ElementDiff ->
-                                lists:map(
-                                  fun(NextPath) -> [Name, NextPath] end,
-                                  do_pathspec_to_binpath(ElementSchema, ElementDiff)
-                                 )
-                            end
+                    case maps:get(ElementId, UnionDiff) of
+                        ?difference ->
+                            [[]];
+                        ElementDiff ->
+                            lists:map(
+                                fun(NextPath) -> [Name, NextPath] end,
+                                do_pathspec_to_binpath(ElementSchema, ElementDiff)
+                            )
+                    end
                 end,
                 maps:to_list(ElementPathSpecs)
             )

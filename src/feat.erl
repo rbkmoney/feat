@@ -233,13 +233,17 @@ compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(Val
         % different everywhere
         Diff1 when map_size(Diff1) > 0 ->
             HasComplexDiffs =
-                0 /= map_size(maps:filter(
-                                fun
-                                    (?discriminator, _) -> false;
-                                    (_, ?difference) -> false;
-                                    (_, _) -> true
-                                         end,
-                                Result)),
+                0 /=
+                    map_size(
+                        maps:filter(
+                            fun
+                                (?discriminator, _) -> false;
+                                (_, ?difference) -> false;
+                                (_, _) -> true
+                            end,
+                            Result
+                        )
+                    ),
 
             case HasComplexDiffs of
                 % All nested fields are different
@@ -247,7 +251,7 @@ compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(Val
                     Diff#{Key => ?difference};
                 true ->
                     Diff#{Key => Diff1}
-                end;
+            end;
         _ when map_size(Result) == 0 ->
             % no notable differences
             Diff
