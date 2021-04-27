@@ -145,9 +145,13 @@ list_diff_fields(Schema, Diff) ->
 
 list_diff_fields_(Diffs, {set, Schema}, Acc) when is_map(Schema) ->
     maps:fold(
-        fun(I, Diff, {PathsAcc, PathRev}) ->
-            {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
-            {NewPathsAcc, PathRev}
+        fun
+            (I, ?difference, {PathsAcc, PathRev}) ->
+                Path = lists:reverse([I | PathRev]),
+                {[Path | PathsAcc], PathRev};
+            (I, Diff, {PathsAcc, PathRev}) ->
+                {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
+                {NewPathsAcc, PathRev}
         end,
         Acc,
         Diffs
@@ -220,16 +224,31 @@ compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
     compare_list_features_(Values, ValuesWith, Diff).
 
 compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(ValueWith) ->
-    case compare_features(Value, ValueWith) of
-        ValueWith ->
-            % different everywhere
-            Diff#{Key => ?difference};
+    Result = compare_features(Value, ValueWith),
+
+    case Result of
         #{?discriminator := _} ->
             % Different with regard to discriminator, semantically same as different everywhere.
             Diff#{Key => ?difference};
+        % different everywhere
         Diff1 when map_size(Diff1) > 0 ->
-            Diff#{Key => Diff1};
-        #{} ->
+            HasComplexDiffs =
+                0 /= map_size(maps:filter(
+                                fun
+                                    (?discriminator, _) -> false;
+                                    (_, ?difference) -> false;
+                                    (_, _) -> true
+                                         end,
+                                Result)),
+
+            case HasComplexDiffs of
+                % All nested fields are different
+                false ->
+                    Diff#{Key => ?difference};
+                true ->
+                    Diff#{Key => Diff1}
+                end;
+        _ when map_size(Result) == 0 ->
             % no notable differences
             Diff
     end.
