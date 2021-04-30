@@ -7,10 +7,10 @@
 ]).
 
 -type traverse_node() ::
-        value |
-        {set, feat:schema()} |
-        {nested, feat:schema()} |
-        {union, DiscriminatorName :: feat:request_key(), feat:schema()}.
+    value
+    | {set, feat:schema()}
+    | {nested, feat:schema()}
+    | {union, DiscriminatorName :: feat:request_key(), feat:schema()}.
 -type reverse_traversal_path() :: [{feat:feature_name(), feat:request_key()}].
 
 -type traversal_fun_result(T) :: T | {no_traverse, T}.

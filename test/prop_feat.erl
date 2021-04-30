@@ -11,6 +11,10 @@
 
 -define(NON_EMPTY(Spec), ?SUCHTHAT(X, Spec, X /= [])).
 -define(SIZE_NON_EMPTY(Spec), ?SIZED(Size, resize(max(1, Size), Spec))).
+-define(assertEqualSets(List1, List2), begin
+    ?assertEqual(List1 -- List2, List2 -- List1),
+    true
+end).
 
 -spec prop_hash_calculatable() -> proper:test().
 prop_hash_calculatable() ->
@@ -116,7 +120,7 @@ prop_list_diff_fields() ->
                             %% io:fwrite("~p~n", [{fields, ChangedFields}]),
 
                             is_map(Diff) andalso
-                                assertEqualSets(ChangedFields, DiffFields)
+                                ?assertEqualSets(ChangedFields, DiffFields)
                     end
                 end
             )
@@ -172,78 +176,84 @@ do_generate_schema(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatu
         if
             %% Sets and Nested Schemas
             DiceNested, not DiceUnion, RestFeatures /= [] ->
-                {NestedFeatures, LeftFeatures} = lists_split_by_perc(
-                    randf(maps:get(max_nested_elements_perc, Opts)),
-                    RestFeatures
-                ),
-                NestedSchema = do_generate_schema(
-                    Opts,
-                    NestedFeatures,
-                    #{}
-                ),
-
-                case map_size(NestedSchema) of
-                    0 ->
-                        {CurrentFeatures, Acc};
-                    _ ->
-                        DiceIsSet = dice(2),
-                        Value =
-                            case DiceIsSet of
-                                true -> {set, NestedSchema};
-                                false -> NestedSchema
-                            end,
-                        {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)}
-                end;
+                do_generate_set_or_nested(Opts, CurrentFeatures, Acc);
             %% DiscriminatedSchema aka Union
             DiceNested, DiceUnion, tl(RestFeatures) /= [] ->
-                [{_, DiscriminatorName} | RestFeatures1] = RestFeatures,
-                MaxUnionVariants = min(
-                    maps:get(max_union_variants, Opts, 3),
-                    length(RestFeatures1)
-                ),
-                VariantCount = rand(MaxUnionVariants),
-
-                {VariantFeatures, RestFeatures2} = lists:split(VariantCount, RestFeatures1),
-
-                {VariantSchemaFeatures, NextRestFeatures} =
-                    lists_split_by_perc(
-                        randf(maps:get(max_nested_elements_perc, Opts)),
-                        RestFeatures2
-                    ),
-
-                %% TODO: Can't features be reused across union elements? Or it's schema error (check during tests)
-                UnionSchema =
-                    lists:foldl(
-                        fun({{VariantFeatureID, _VariantFeatureName}, VariantNestedFeatures}, UnionAcc) ->
-                            VariantSchema =
-                                do_generate_schema(
-                                    Opts,
-                                    VariantNestedFeatures,
-                                    #{}
-                                ),
-
-                            case map_size(VariantSchema) of
-                                0 -> UnionAcc;
-                                _ -> maps:put(VariantFeatureID, VariantSchema, UnionAcc)
-                            end
-                        end,
-                        #{?discriminator => [DiscriminatorName]},
-                        lists:zip(
-                            VariantFeatures,
-                            lists_split_randomly(VariantCount, VariantSchemaFeatures)
-                        )
-                    ),
-
-                %% If generation used features but produced almost empty union schema -- skip this iteration
-                case map_size(UnionSchema) == 1 andalso VariantFeatures /= [] andalso VariantSchemaFeatures /= [] of
-                    true -> {CurrentFeatures, Acc};
-                    false -> {NextRestFeatures, maps:put(FeatureID, [FeatureName, UnionSchema], Acc)}
-                end;
+                do_generate_union(Opts, CurrentFeatures, Acc);
             %% Simple Value
             true ->
                 {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)}
         end,
     do_generate_schema(Opts, NextFeatures, NextAcc).
+
+do_generate_set_or_nested(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatures], Acc) ->
+    {NestedFeatures, LeftFeatures} = lists_split_by_perc(
+        randf(maps:get(max_nested_elements_perc, Opts)),
+        RestFeatures
+    ),
+    NestedSchema = do_generate_schema(
+        Opts,
+        NestedFeatures,
+        #{}
+    ),
+
+    case map_size(NestedSchema) of
+        0 ->
+            {CurrentFeatures, Acc};
+        _ ->
+            DiceIsSet = dice(2),
+            Value =
+                case DiceIsSet of
+                    true -> {set, NestedSchema};
+                    false -> NestedSchema
+                end,
+            {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)}
+    end.
+
+do_generate_union(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatures], Acc) ->
+    [{_, DiscriminatorName} | RestFeatures1] = RestFeatures,
+    MaxUnionVariants = min(
+        maps:get(max_union_variants, Opts, 3),
+        length(RestFeatures1)
+    ),
+    VariantCount = rand(MaxUnionVariants),
+
+    {VariantFeatures, RestFeatures2} = lists:split(VariantCount, RestFeatures1),
+
+    {VariantSchemaFeatures, NextRestFeatures} =
+        lists_split_by_perc(
+            randf(maps:get(max_nested_elements_perc, Opts)),
+            RestFeatures2
+        ),
+
+    %% TODO: Can't features be reused across union elements? Or it's schema error (check during tests)
+    UnionSchema =
+        lists:foldl(
+            fun({{VariantFeatureID, _VariantFeatureName}, VariantNestedFeatures}, UnionAcc) ->
+                VariantSchema =
+                    do_generate_schema(
+                        Opts,
+                        VariantNestedFeatures,
+                        #{}
+                    ),
+
+                case map_size(VariantSchema) of
+                    0 -> UnionAcc;
+                    _ -> maps:put(VariantFeatureID, VariantSchema, UnionAcc)
+                end
+            end,
+            #{?discriminator => [DiscriminatorName]},
+            lists:zip(
+                VariantFeatures,
+                lists_split_randomly(VariantCount, VariantSchemaFeatures)
+            )
+        ),
+
+    %% If generation used features but produced almost empty union schema -- skip this iteration
+    case map_size(UnionSchema) == 1 andalso VariantFeatures /= [] andalso VariantSchemaFeatures /= [] of
+        true -> {CurrentFeatures, Acc};
+        false -> {NextRestFeatures, maps:put(FeatureID, [FeatureName, UnionSchema], Acc)}
+    end.
 
 features(Size) ->
     ?LET(
@@ -397,41 +407,7 @@ assert_correct_read(Schema, Features, Entity) ->
                         %% Inside recursive union comparison: there's a field with the same noun
                         false;
                     {{union, DiscriminatorName, UnionSchema}, {nested, NestedFeatures, NestedValues}} ->
-                        DiscriminatorResult =
-                            maps:get(?discriminator, NestedFeatures) ==
-                                feat:hash(maps:get(DiscriminatorName, NestedValues)),
-
-                        OkUnionVariantsCount =
-                            maps:fold(
-                                fun(Idx, UnionVariantSchema, Acc) ->
-                                    UnionVariantFeatures =
-                                        maps:get(Idx, NestedFeatures),
-
-                                    try
-                                        assert_correct_read(
-                                            UnionVariantSchema,
-                                            UnionVariantFeatures,
-                                            NestedValues
-                                        )
-                                    of
-                                        false -> Acc;
-                                        true -> Acc + 1
-                                    catch
-                                        %% Union element miss
-                                        throw:UnknownFeature when element(1, UnknownFeature) == unknown_feature ->
-                                            Acc;
-                                        %% 2+ union elements with different structure and same nouns
-                                        throw:FeatureNotMap when element(1, FeatureNotMap) == feature_not_map ->
-                                            Acc
-                                    end
-                                end,
-                                0,
-                                UnionSchema
-                            ),
-                        UnionVariantCount = map_size(UnionSchema),
-                        UnionVariantsResult = (OkUnionVariantsCount > 0) or (UnionVariantCount == 0),
-
-                        DiscriminatorResult and UnionVariantsResult;
+                        assert_correct_read_union(DiscriminatorName, UnionSchema, NestedFeatures, NestedValues);
                     {_, {nested, _, _}} ->
                         throw({nested_features, Path})
                 end
@@ -439,6 +415,43 @@ assert_correct_read(Schema, Features, Entity) ->
         true,
         Schema
     ).
+
+assert_correct_read_union(DiscriminatorName, UnionSchema, NestedFeatures, NestedValues) ->
+    DiscriminatorResult =
+        maps:get(?discriminator, NestedFeatures) ==
+            feat:hash(maps:get(DiscriminatorName, NestedValues)),
+
+    OkUnionVariantsCount =
+        maps:fold(
+            fun(Idx, UnionVariantSchema, Acc) ->
+                UnionVariantFeatures =
+                    maps:get(Idx, NestedFeatures),
+
+                try
+                    assert_correct_read(
+                        UnionVariantSchema,
+                        UnionVariantFeatures,
+                        NestedValues
+                    )
+                of
+                    false -> Acc;
+                    true -> Acc + 1
+                catch
+                    %% Union element miss
+                    throw:UnknownFeature when element(1, UnknownFeature) == unknown_feature ->
+                        Acc;
+                    %% 2+ union elements with different structure and same nouns
+                    throw:FeatureNotMap when element(1, FeatureNotMap) == feature_not_map ->
+                        Acc
+                end
+            end,
+            0,
+            UnionSchema
+        ),
+    UnionVariantCount = map_size(UnionSchema),
+    UnionVariantsResult = (OkUnionVariantsCount > 0) or (UnionVariantCount == 0),
+
+    DiscriminatorResult and UnionVariantsResult.
 
 %% TODO: use ?assert*
 assert_correct_compare(Diff, Paths) ->
@@ -475,94 +488,99 @@ do_assert_correct_compare(Diff, Paths, RevPath) ->
                         false
                 end;
             ({set, Id, Name, NestedPaths, NestedSchema}, _) ->
-                NewRevPath = [{Id, Name} | RevPath],
-                case maps:find(Id, Diff) of
-                    %% TODO: how to check if length is indeed different in tests?
-                    {ok, ?difference} ->
-                        true;
-                    {ok, SetDiff} when is_map(SetDiff) ->
-                        maps:fold(
-                            fun
-                                (_, _, false) ->
-                                    false;
-                                (Idx, NestedDiff, _) ->
-                                    NextRevPath = [{Idx, Idx} | NewRevPath],
-                                    Result = do_assert_correct_compare(
-                                        NestedDiff,
-                                        NestedPaths,
-                                        NextRevPath
-                                    ),
-                                    case Result of
-                                        false ->
-                                            logger:error("Diff for ~p is incorrect", [NextRevPath]),
-                                            false;
-                                        true ->
-                                            true
-                                    end
-                            end,
-                            true,
-                            SetDiff
-                        );
-                    error ->
-                        logger:error("Set diff is not found at ~p for subschema: ~p~n", [
-                            lists:reverse(NewRevPath),
-                            NestedSchema
-                        ]),
-                        false
-                end;
+                assert_correct_compare_set(Id, Name, NestedPaths, NestedSchema, Diff, RevPath);
             ({union, Id, Name, DiscriminatorName, VariantPathSpecs, UnionSchema}, _) ->
-                NewRevPath = [{Id, Name} | RevPath],
-                case maps:find(Id, Diff) of
-                    {ok, ?difference} when DiscriminatorName /= undefined ->
-                        true;
-                    {ok, ?difference} ->
-                        logger:error(
-                            "Union diff at ~p shows total diff for unchanged discriminator: ~p~n",
-                            [
-                                lists:reverse(NewRevPath),
-                                UnionSchema
-                            ]
-                        ),
-                        false;
-                    {ok, NestedDiff} ->
-                        lists:foldl(
-                            fun
-                                (_, false) ->
-                                    false;
-                                ({Idx, PathSpec}, true) ->
-                                    case maps:find(Idx, NestedDiff) of
-                                        {ok, UnionVariantDiff} ->
-                                            do_assert_correct_compare(
-                                                UnionVariantDiff,
-                                                PathSpec,
-                                                [{Idx, union} | NewRevPath]
-                                            );
-                                        error ->
-                                            logger:error(
-                                                "Expected union element ~p at ~p is not found in diff ~p: ~p~n",
-                                                [
-                                                    Idx,
-                                                    lists:reverse(NewRevPath),
-                                                    NestedDiff,
-                                                    UnionSchema
-                                                ]
-                                            )
-                                    end
-                            end,
-                            true,
-                            VariantPathSpecs
-                        );
-                    error ->
-                        logger:error("Union diff is not found at ~p for subschema: ~p~n", [
-                            lists:reverse(NewRevPath),
-                            UnionSchema
-                        ]),
-                        false
-                end
+                assert_correct_compare_union(Id, Name, DiscriminatorName, VariantPathSpecs, UnionSchema, Diff, RevPath)
         end,
         true,
         Paths
     ).
+
+assert_correct_compare_set(Id, Name, NestedPaths, NestedSchema, Diff, RevPath) ->
+    NewRevPath = [{Id, Name} | RevPath],
+    case maps:find(Id, Diff) of
+        %% TODO: how to check if length is indeed different in tests?
+        {ok, ?difference} ->
+            true;
+        {ok, SetDiff} when is_map(SetDiff) ->
+            maps:fold(
+                fun
+                    (_, _, false) ->
+                        false;
+                    (Idx, NestedDiff, _) ->
+                        NextRevPath = [{Idx, Idx} | NewRevPath],
+                        Result = do_assert_correct_compare(
+                            NestedDiff,
+                            NestedPaths,
+                            NextRevPath
+                        ),
+                        case Result of
+                            false ->
+                                logger:error("Diff for ~p is incorrect", [NextRevPath]),
+                                false;
+                            true ->
+                                true
+                        end
+                end,
+                true,
+                SetDiff
+            );
+        error ->
+            logger:error("Set diff is not found at ~p for subschema: ~p~n", [
+                lists:reverse(NewRevPath),
+                NestedSchema
+            ]),
+            false
+    end.
+assert_correct_compare_union(Id, Name, DiscriminatorName, VariantPathSpecs, UnionSchema, Diff, RevPath) ->
+    NewRevPath = [{Id, Name} | RevPath],
+    case maps:find(Id, Diff) of
+        {ok, ?difference} when DiscriminatorName /= undefined ->
+            true;
+        {ok, ?difference} ->
+            logger:error(
+                "Union diff at ~p shows total diff for unchanged discriminator: ~p~n",
+                [
+                    lists:reverse(NewRevPath),
+                    UnionSchema
+                ]
+            ),
+            false;
+        {ok, NestedDiff} ->
+            lists:foldl(
+                fun
+                    (_, false) ->
+                        false;
+                    ({Idx, PathSpec}, true) ->
+                        case maps:find(Idx, NestedDiff) of
+                            {ok, UnionVariantDiff} ->
+                                do_assert_correct_compare(
+                                    UnionVariantDiff,
+                                    PathSpec,
+                                    [{Idx, union} | NewRevPath]
+                                );
+                            error ->
+                                logger:error(
+                                    "Expected union element ~p at ~p is not found in diff ~p: ~p~n",
+                                    [
+                                        Idx,
+                                        lists:reverse(NewRevPath),
+                                        NestedDiff,
+                                        UnionSchema
+                                    ]
+                                )
+                        end
+                end,
+                true,
+                VariantPathSpecs
+            );
+        error ->
+            logger:error("Union diff is not found at ~p for subschema: ~p~n", [
+                lists:reverse(NewRevPath),
+                UnionSchema
+            ]),
+            false
+    end.
 
 pathspecs(Schema) ->
     traverse_schema(
@@ -594,6 +612,7 @@ pathspecs(Schema) ->
         [],
         Schema
     ).
+
 random_pathspecs_for_change(Schema) ->
     Score = schema_score(Schema),
     ?SIZED(
@@ -847,18 +866,18 @@ set_maybe_change(Entities, Paths) ->
             )
     end.
 set_maybe_permute(Entities) ->
-    case rand:uniform(2) of
-        1 ->
+    case dice(2) of
+        false ->
             Entities;
-        2 ->
+        true ->
             %% io:fwrite("~p~n", ["Permute"]),
             shuffle(Entities)
     end.
 set_maybe_remove(Entities) ->
-    case rand:uniform(2) of
-        1 ->
+    case dice(2) of
+        false ->
             Entities;
-        2 ->
+        true ->
             %% io:fwrite("~p~n", ["Remove"]),
             lists:flatmap(
                 fun(Entity) ->
@@ -871,35 +890,36 @@ set_maybe_remove(Entities) ->
             )
     end.
 set_maybe_add(Entities, Schema) ->
-    case rand:uniform(2) of
-        1 ->
+    case dice(2) of
+        false ->
             Entities;
-        2 ->
+        true ->
             Length = length(Entities),
             MaxAddPerIter = max(1, Length),
             Chance = max(1, Length div 2),
-            lists:flatmap(
-                fun(Entity) ->
-                    case {rand:uniform(Chance), rand:uniform(2), rand:uniform(MaxAddPerIter)} of
-                        {Value, Where, Count} when Value == Chance ->
-                            NewEntities =
-                                lists:map(
-                                    fun(_) -> fill_schema(Schema) end,
-                                    lists:seq(1, Count)
-                                ),
-                            case Where of
-                                1 ->
-                                    NewEntities ++ [Entity];
-                                2 ->
-                                    [Entity | NewEntities]
-                            end;
-                        _ ->
-                            [Entity]
-                    end
-                end,
-                Entities
-            )
+            Mapper = fun(Entity) ->
+                case dice(Chance) of
+                    true ->
+                        NewEntities = generate_new_entities(rand1(MaxAddPerIter), Schema),
+                        Prepend = dice(2),
+                        case Prepend of
+                            true ->
+                                NewEntities ++ [Entity];
+                            false ->
+                                [Entity | NewEntities]
+                        end;
+                    false ->
+                        [Entity]
+                end
+            end,
+            lists:flatmap(Mapper, Entities)
     end.
+
+generate_new_entities(Count, Schema) ->
+    lists:map(
+        fun(_) -> fill_schema(Schema) end,
+        lists:seq(1, Count)
+    ).
 
 maps_update_existing_with(Key, Fun, Map) ->
     case maps:find(Key, Map) of
@@ -1011,10 +1031,6 @@ do_deep_fetch(Map, [Key | Rest], Path) ->
         {ok, NextValue} ->
             do_deep_fetch(NextValue, Rest, NewPath)
     end.
-
-assertEqualSets(List1, List2) ->
-    ?assertEqual(List1 -- List2, List2 -- List1),
-    true.
 
 id_path(Path) ->
     lists:map(fun({Id, _Name}) -> Id end, Path).
