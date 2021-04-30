@@ -82,7 +82,6 @@ prop_compare_different() ->
                     Features2 = feat:read(Schema, Entity2),
 
                     {false, Diff} = feat:compare(Features1, Features2),
-                    %% io:fwrite("~p~n", [{diff, Diff}]),
 
                     assert_correct_compare(Diff, PathSpecs)
                 end
@@ -97,7 +96,7 @@ prop_list_diff_fields() ->
         schema(),
         ?FORALL(
             [Entity1, PathSpecs],
-            [fill_schema(Schema), random_pathspecs_for_change(Schema)],
+            [fill_schema(Schema), ?SIZE_NON_EMPTY(random_pathspecs_for_change(Schema))],
             ?FORALL(
                 Entity2,
                 change_values_by_paths(PathSpecs, Entity1),
@@ -105,23 +104,14 @@ prop_list_diff_fields() ->
                     Features1 = feat:read(Schema, Entity1),
                     Features2 = feat:read(Schema, Entity2),
 
-                    case feat:compare(Features1, Features2) of
-                        true ->
-                            true;
-                        {false, Diff} ->
-                            %% io:fwrite("~p~n", [{diff, Diff}]),
+                    {false, Diff} = feat:compare(Features1, Features2),
+                    DiffFields = feat:list_diff_fields(Schema, Diff),
 
-                            DiffFields = feat:list_diff_fields(Schema, Diff),
-                            %% io:fwrite("~p~n", [{diff_fields, DiffFields}]),
+                    ChangedFields =
+                        pathspecs_to_binpaths(PathSpecs, Diff),
 
-                            ChangedFields =
-                                pathspecs_to_binpaths(PathSpecs, Diff),
-
-                            %% io:fwrite("~p~n", [{fields, ChangedFields}]),
-
-                            is_map(Diff) andalso
-                                ?assertEqualSets(ChangedFields, DiffFields)
-                    end
+                    is_map(Diff) andalso
+                        ?assertEqualSets(ChangedFields, DiffFields)
                 end
             )
         )
@@ -266,9 +256,6 @@ features(Size) ->
         lists:zip(lists:seq(1, length(Names)), Names)
     ).
 
-%% non_unique_features() ->
-%%     list({non_neg_integer(), identifier()}).
-
 identifier() ->
     ?LET(
         [Parts, Separator],
@@ -308,7 +295,6 @@ fill_schema(Schema) ->
                     {error, map_overwrite} -> Acc
                 end;
             ({set, NestedSchema}, Acc, RevPath) ->
-                %% io:fwrite("~p~n", [{set, lists:reverse(RevPath)}]),
                 Elements =
                     lists:map(
                         fun(_) -> fill_schema(NestedSchema) end,
@@ -358,7 +344,6 @@ assert_correct_read(Schema, Features, Entity) ->
                 Acc;
             (Kind, true, RevPath) ->
                 Path = lists:reverse(RevPath),
-                %% io:fwrite("~p~n", [{path, Path}]),
                 FeatureResult = deep_fetch(id_path(Path), Features),
                 EntityResult = deep_fetch(name_path(Path), Entity),
                 Action =
@@ -388,7 +373,6 @@ assert_correct_read(Schema, Features, Entity) ->
                         %% Inside recursive union comparison: there's a field with the same noun
                         false;
                     {{set, NestedSchema}, {ok, NestedFeatureSet, NestedValues}} ->
-                        %% io:fwrite("~p~n", [{set, NestedSchema, NestedFeatureSet, NestedValues}]),
                         NestedFeatures = lists:map(fun([_Index, Feats]) -> Feats end, NestedFeatureSet),
                         NestedEntities = lists:reverse(lists:sort(NestedValues)),
                         Result =
@@ -782,7 +766,6 @@ change_values_by_paths(Paths, Entity) ->
                     Name,
                     fun(NestedEntity) ->
                         NewNestedEntity = change_values_by_paths(NestedPaths, NestedEntity),
-                        %% io:fwrite("~p~n", [{change, NestedEntity, NewNestedEntity, NestedPaths}]),
                         NewNestedEntity
                     end,
                     EntityAcc
@@ -854,7 +837,6 @@ set_maybe_change(Entities, Paths) ->
         1 ->
             Entities;
         2 ->
-            %% io:fwrite("~p~n", ["Change"]),
             lists:map(
                 fun(Entity) ->
                     case rand:uniform(4) of
@@ -870,7 +852,6 @@ set_maybe_permute(Entities) ->
         false ->
             Entities;
         true ->
-            %% io:fwrite("~p~n", ["Permute"]),
             shuffle(Entities)
     end.
 set_maybe_remove(Entities) ->
@@ -878,7 +859,6 @@ set_maybe_remove(Entities) ->
         false ->
             Entities;
         true ->
-            %% io:fwrite("~p~n", ["Remove"]),
             lists:flatmap(
                 fun(Entity) ->
                     case rand:uniform(2) of
@@ -1041,7 +1021,6 @@ name_path(Path) ->
 pathspecs_to_binpaths(PathSpecs, Diff) ->
     lists:flatmap(
         fun(PathSpec) ->
-            %% io:fwrite("~p~n", [{pathspec, PathSpec}]),
             lists:flatmap(
                 fun(PathList) ->
                     case lists:join($., PathList) of
@@ -1089,7 +1068,6 @@ do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
                         [[Name, erlang:integer_to_binary(Index)]];
                     ({Index, NestedDiff}) ->
                         %% For each (changed) path
-                        %% throw(fuck),
                         %% BUG: Natural reordering due to changes to multiple fields is not taken into account
                         lists:flatmap(
                             fun(PathSpec) ->
