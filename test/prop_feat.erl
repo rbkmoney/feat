@@ -4,6 +4,8 @@
 -include_lib("proper/include/proper.hrl").
 -include_lib("stdlib/include/assert.hrl").
 
+-import(feat_utils, [traverse_schema/3]).
+
 -define(PROP(Prop), ?PROP(Prop, [])).
 -define(PROP(Prop, Opts), ?assert(proper:quickcheck(Prop, [{to_file, user}] ++ Opts))).
 
@@ -1110,44 +1112,3 @@ do_pathspec_to_binpath({union, Id, Name, _DiscriminatorName, VariantPathSpecs, _
                 maps:to_list(VariantPathSpecs)
             )
     end.
-
-traverse_schema(Fun, Acc, Schema) ->
-    {ResultAcc, _RevPath} = do_traverse_schema(Fun, Acc, Schema, []),
-    ResultAcc.
-
-do_traverse_schema(Fun, Acc, Schema, InitRevPath) ->
-    maps:fold(
-        fun
-            (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], {CurrentAcc, RevPath}) ->
-                NewAcc = Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [
-                    {Id, Name}
-                    | RevPath
-                ]),
-                %% TODO: no_traverse here?
-                {NewAcc, RevPath};
-            (Id, [Name, Value], {CurrentAcc, RevPath}) ->
-                NewRevPath = [{Id, Name} | RevPath],
-                Arg =
-                    {_, NestedSchema} =
-                    case Value of
-                        {set, Nested} ->
-                            {set, Nested};
-                        Nested ->
-                            {nested, Nested}
-                    end,
-                ResultAcc =
-                    case Fun(Arg, CurrentAcc, NewRevPath) of
-                        {no_traverse, ReturnedAcc} ->
-                            ReturnedAcc;
-                        NewAcc ->
-                            {ReturnedAcc, _RevPath} = do_traverse_schema(Fun, NewAcc, NestedSchema, NewRevPath),
-                            ReturnedAcc
-                    end,
-                {ResultAcc, RevPath};
-            (Id, [Name], {CurrentAcc, RevPath}) ->
-                NewAcc = Fun(value, CurrentAcc, [{Id, Name} | RevPath]),
-                {NewAcc, RevPath}
-        end,
-        {Acc, InitRevPath},
-        Schema
-    ).
