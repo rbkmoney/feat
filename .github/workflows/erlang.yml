@@ -23,6 +23,12 @@ jobs:
       run: make compile
     - name: Run Xref
       run: make xref
+    - name: Cache build
+      id: cache-build
+      uses: actions/cache@v2
+      with:
+        path: "_build/default/"
+        key: ${{ runner.os }}-${{ hashFiles('rebar.lock') }}-build-default
     - name: Run Dialyzer
       run: make dialyze
     - name: Run erlfmt
