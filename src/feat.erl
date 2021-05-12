@@ -210,8 +210,12 @@ compare_features(Fs, FsWith) ->
 compare_list_features(Key, L1, L2, Diff) when length(L1) =/= length(L2) ->
     Diff#{Key => ?difference};
 compare_list_features(Key, L1, L2, Acc) ->
-    case compare_list_features_(L1, L2, #{}) of
-        Diff when map_size(Diff) > 0 ->
+    Diff = compare_list_features_(L1, L2, #{}),
+    ComplexDiffCount = complex_diff_count(Diff),
+    case Diff of
+        _ when map_size(Diff) > 0, ComplexDiffCount == length(L1) ->
+            Acc#{Key => ?difference};
+        _ when map_size(Diff) > 0 ->
             Acc#{Key => Diff};
         #{} ->
             Acc
@@ -233,16 +237,7 @@ compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(Val
         % different everywhere
         Diff1 when map_size(Diff1) > 0 ->
             HasComplexDiffs =
-                0 /=
-                    maps:fold(
-                        fun
-                            (?discriminator, _, Count) -> Count;
-                            (_, ?difference, Count) -> Count;
-                            (_, _, Count) -> Count + 1
-                        end,
-                        0,
-                        Result
-                    ),
+                0 /= complex_diff_count(Result),
 
             case HasComplexDiffs of
                 % All nested fields are different
@@ -255,6 +250,17 @@ compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(Val
             % no notable differences
             Diff
     end.
+
+complex_diff_count(Diff) ->
+    maps:fold(
+        fun
+            (?discriminator, _, Count) -> Count;
+            (_, ?difference, Count) -> Count;
+            (_, _, Count) -> Count + 1
+        end,
+        0,
+        Diff
+    ).
 
 zipfold(Fun, Acc, M1, M2) ->
     maps:fold(
