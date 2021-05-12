@@ -17,7 +17,7 @@
         ?discriminator := [request_key()],
         feature_name() := schema()
     }.
--type difference() :: #{request_key() := ?difference | difference()}.
+-type difference() :: ?difference | #{request_key() := difference()}.
 
 -type event() ::
     {invalid_schema_fragment, feature_name(), request()}
@@ -125,7 +125,9 @@ get_event_handler(undefined) ->
 hash(V) ->
     erlang:phash2(V).
 
--spec list_diff_fields(schema(), difference()) -> [binary()].
+-spec list_diff_fields(schema(), difference()) -> all | [binary()].
+list_diff_fields(_Schema, ?difference) ->
+    all;
 list_diff_fields(Schema, Diff) ->
     {ConvertedDiff, _} = list_diff_fields_(Diff, Schema, {[], []}),
     lists:foldl(
@@ -178,6 +180,8 @@ list_diff_fields_(Diff, [Key | Schema], {PathsAcc, PathRev}) ->
 -spec compare(features(), features()) -> true | {false, difference()}.
 compare(Features, FeaturesWith) ->
     case compare_features(Features, FeaturesWith) of
+        ?difference ->
+            {false, ?difference};
         Diff when map_size(Diff) > 0 ->
             {false, Diff};
         _ ->
@@ -185,38 +189,38 @@ compare(Features, FeaturesWith) ->
     end.
 
 compare_features(Fs, FsWith) ->
+    minimize_diff(compare_features_(Fs, FsWith)).
+
+compare_features_(Fs, FsWith) ->
     zipfold(
-        fun
-            (Key, Values, ValuesWith, Diff) when is_list(ValuesWith), is_list(Values) ->
-                compare_list_features(Key, Values, ValuesWith, Diff);
-            (Key, Value, ValueWith, Diff) when is_map(ValueWith) and is_map(Value) ->
-                compare_features_(Key, Value, ValueWith, Diff);
-            %% We expect that clients may _at any time_ change their implementation and start
-            %% sending information they were not sending beforehand, so this is not considered a
-            %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
-            %% information they were sending, this is still a conflict.
-            (_Key, _Value, undefined, Diff) ->
-                Diff;
-            (_Key, Value, Value, Diff) ->
-                Diff;
-            (Key, Value, ValueWith, Diff) when Value =/= ValueWith ->
-                Diff#{Key => ?difference}
-        end,
-        #{},
-        Fs,
-        FsWith
-    ).
+      fun
+          (Key, Values, ValuesWith, Diff) when is_list(ValuesWith), is_list(Values) ->
+                   compare_list_features(Key, Values, ValuesWith, Diff);
+          (Key, Value, ValueWith, Diff) when is_map(ValueWith) and is_map(Value) ->
+                   compare_nested_features_(Key, Value, ValueWith, Diff);
+          %% We expect that clients may _at any time_ change their implementation and start
+          %% sending information they were not sending beforehand, so this is not considered a
+          %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
+          %% information they were sending, this is still a conflict.
+          (_Key, _Value, undefined, Diff) ->
+                   Diff;
+          (_Key, Value, Value, Diff) ->
+                   Diff;
+          (Key, Value, ValueWith, Diff) when Value =/= ValueWith ->
+                   Diff#{Key => ?difference}
+           end,
+      #{},
+      Fs,
+      FsWith
+     ).
 
 compare_list_features(Key, L1, L2, Diff) when length(L1) =/= length(L2) ->
     Diff#{Key => ?difference};
 compare_list_features(Key, L1, L2, Acc) ->
     Diff = compare_list_features_(L1, L2, #{}),
-    ComplexDiffCount = complex_diff_count(Diff),
     case Diff of
-        _ when map_size(Diff) > 0, ComplexDiffCount == 0 ->
-            Acc#{Key => ?difference};
         _ when map_size(Diff) > 0 ->
-            Acc#{Key => Diff};
+            Acc#{Key => minimize_diff(Diff)};
         #{} ->
             Acc
     end.
@@ -224,27 +228,29 @@ compare_list_features(Key, L1, L2, Acc) ->
 compare_list_features_([], [], Diff) ->
     Diff;
 compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
-    Diff = compare_features_(Index, V1, V2, Acc),
+    Diff = compare_nested_features_(Index, V1, V2, Acc),
     compare_list_features_(Values, ValuesWith, Diff).
 
-compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(ValueWith) ->
-    Result = compare_features(Value, ValueWith),
-
-    case Result of
+compare_nested_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(ValueWith) ->
+    case compare_features_(Value, ValueWith) of
         #{?discriminator := _} ->
             % Different with regard to discriminator, semantically same as different everywhere.
             Diff#{Key => ?difference};
         % different everywhere
-        Diff1 when map_size(Diff1) > 0 ->
-            case complex_diff_count(Result) of
-                % All nested fields are different
-                0 ->
-                    Diff#{Key => ?difference};
-                _ ->
-                    Diff#{Key => Diff1}
-            end;
-        _ when map_size(Result) == 0 ->
+        NestedDiff when map_size(NestedDiff) > 0 ->
+            Diff#{Key => minimize_diff(NestedDiff)};
+        #{} ->
             % no notable differences
+            Diff
+    end.
+
+minimize_diff(?difference) -> ?difference;
+minimize_diff(EmptyDiff) when map_size(EmptyDiff) == 0 -> #{};
+minimize_diff(Diff) ->
+    case complex_diff_count(Diff) of
+        0 ->
+            ?difference;
+        _ ->
             Diff
     end.
 

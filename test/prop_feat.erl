@@ -107,11 +107,17 @@ prop_list_diff_fields() ->
                     {false, Diff} = feat:compare(Features1, Features2),
                     DiffFields = feat:list_diff_fields(Schema, Diff),
 
-                    ChangedFields =
-                        pathspecs_to_binpaths(PathSpecs, Diff),
+                    case DiffFields of
+                        all ->
+                            %% TODO: more complex check
+                            true;
+                        DiffFields when is_list(DiffFields) ->
+                            ChangedFields =
+                                pathspecs_to_binpaths(PathSpecs, Diff),
 
-                    is_map(Diff) andalso
-                        ?assertEqualSets(ChangedFields, DiffFields)
+                            is_map(Diff) andalso
+                                ?assertEqualSets(ChangedFields, DiffFields)
+                    end
                 end
             )
         )
