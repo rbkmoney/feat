@@ -234,15 +234,14 @@ compare_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(Val
         Diff1 when map_size(Diff1) > 0 ->
             HasComplexDiffs =
                 0 /=
-                    map_size(
-                        maps:filter(
-                            fun
-                                (?discriminator, _) -> false;
-                                (_, ?difference) -> false;
-                                (_, _) -> true
-                            end,
-                            Result
-                        )
+                    maps:fold(
+                        fun
+                            (?discriminator, _, Count) -> Count;
+                            (_, ?difference, Count) -> Count;
+                            (_, _, Count) -> Count + 1
+                        end,
+                        0,
+                        Result
                     ),
 
             case HasComplexDiffs of
