@@ -213,7 +213,7 @@ compare_list_features(Key, L1, L2, Acc) ->
     Diff = compare_list_features_(L1, L2, #{}),
     ComplexDiffCount = complex_diff_count(Diff),
     case Diff of
-        _ when map_size(Diff) > 0, ComplexDiffCount == length(L1) ->
+        _ when map_size(Diff) > 0, ComplexDiffCount == 0 ->
             Acc#{Key => ?difference};
         _ when map_size(Diff) > 0 ->
             Acc#{Key => Diff};
