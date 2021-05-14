@@ -22,25 +22,23 @@
 
 -spec traverse_schema(traversal_fun(T), InitAcc :: T, feat:schema()) -> T when T :: term().
 traverse_schema(Fun, Acc, Schema) ->
-    {ResultAcc, _RevPath} = do_traverse_schema(Fun, Acc, Schema, []),
-    ResultAcc.
+    do_traverse_schema(Fun, Acc, Schema, []).
 
 %%====================================================================
 %% Internal functions
 %%====================================================================
 
-do_traverse_schema(Fun, Acc, Schema, InitRevPath) ->
+do_traverse_schema(Fun, Acc, Schema, RevPath) ->
     maps:fold(
         fun
-            (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], {CurrentAcc, RevPath}) ->
-                NewAcc = Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [
+            (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], CurrentAcc) ->
+                %% TODO: no_traverse here?
+                Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [
                     {Id, Name}
                     | RevPath
-                ]),
-                %% TODO: no_traverse here?
-                {NewAcc, RevPath};
-            (Id, [Name, Value], {CurrentAcc, RevPath}) ->
-                NewRevPath = [{Id, Name} | RevPath],
+                ]);
+            (Id, [Name, Value], CurrentAcc) ->
+                NextRevPath = [{Id, Name} | RevPath],
                 Arg =
                     {_, NestedSchema} =
                     case Value of
@@ -49,19 +47,15 @@ do_traverse_schema(Fun, Acc, Schema, InitRevPath) ->
                         Nested ->
                             {nested, Nested}
                     end,
-                ResultAcc =
-                    case Fun(Arg, CurrentAcc, NewRevPath) of
-                        {no_traverse, ReturnedAcc} ->
-                            ReturnedAcc;
-                        NewAcc ->
-                            {ReturnedAcc, _RevPath} = do_traverse_schema(Fun, NewAcc, NestedSchema, NewRevPath),
-                            ReturnedAcc
-                    end,
-                {ResultAcc, RevPath};
-            (Id, [Name], {CurrentAcc, RevPath}) ->
-                NewAcc = Fun(value, CurrentAcc, [{Id, Name} | RevPath]),
-                {NewAcc, RevPath}
+                case Fun(Arg, CurrentAcc, NextRevPath) of
+                    {no_traverse, ReturnedAcc} ->
+                        ReturnedAcc;
+                    NewAcc ->
+                        do_traverse_schema(Fun, NewAcc, NestedSchema, NextRevPath)
+                end;
+            (Id, [Name], CurrentAcc) ->
+                Fun(value, CurrentAcc, [{Id, Name} | RevPath])
         end,
-        {Acc, InitRevPath},
+        Acc,
         Schema
     ).
