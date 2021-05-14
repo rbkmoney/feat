@@ -1,30 +1,15 @@
-# snakeoil
+# feat
 
-A service that does something
+Library for extracting features (values) from data.
 
-## Сборка
+Primary usage: to achieve idempotency of requests to a service and detect conflicts. .
 
-Для запуска процесса сборки достаточно выполнить просто:
+## Build
+
+To compile the project:
 
     make
 
-Чтобы запустить полученную сборку в режиме разработки и получить стандартный [Erlang shell][2], нужно всего лишь:
+To run all the checks (used in Github Actions CI) locally, [act](https://github.com/nektos/act) and Docker is required:
 
-    make start
-
-> _Хозяйке на заметку._ При этом используется стандартный Erlang релиз, собранный при помощи [relx][3] в режиме разработчика.
-
-Рекомендуется вести разработку и сборку проекта в рамках локальной виртуальной среды, предоставляемой [wercker][1]. Настоятельно рекомендуется прогоны тестовых сценариев проводить только в этой среде.
-
-    $ wercker dev
-
-> _Хозяйке на заметку._ В зависимости от вашего окружения и операционной системы вам может понадобиться [Docker Machine][4].
-
-## Документация
-
-Дальнейшую документацию можно почерпнуть, пройдясь по ссылкам в [соответствующем документе](doc/index.md). 
-
-[1]: http://devcenter.wercker.com/learn/basics/the-wercker-cli.html
-[2]: http://erlang.org/doc/man/shell.html
-[3]: https://github.com/erlware/relx
-[4]: https://docs.docker.com/machine/install-machine/
+    act
