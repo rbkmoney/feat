@@ -31,6 +31,8 @@ traverse_schema(Fun, Acc, Schema) ->
 do_traverse_schema(Fun, Acc, Schema, RevPath) ->
     maps:fold(
         fun
+            (Id, 'reserved', CurrentAcc) ->
+                Fun(reserved, CurrentAcc, [{Id, Id} | RevPath]);
             (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], CurrentAcc) ->
                 %% TODO: no_traverse here?
                 Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [

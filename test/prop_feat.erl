@@ -136,10 +136,12 @@ schema(Opts) ->
             Features,
             features(Size),
             begin
-                case generate_schema(Opts, Features) of
-                    Empty when map_size(Empty) == 0 ->
+                Schema = generate_schema(Opts, Features),
+                IsEmptySchema = (map_size(Schema) == 0) or (schema_score(Schema) == 0),
+                case IsEmptySchema of
+                    true ->
                         schema(Opts);
-                    Schema ->
+                    false ->
                         Schema
                 end
             end
@@ -165,11 +167,14 @@ do_generate_schema(_Opts, [], Acc) ->
 do_generate_schema(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatures], Acc) ->
     AvgDepth = maps:get(avg_depth, Opts, 3),
 
+    DiceReserved = dice(10),
     DiceNested = not dice(AvgDepth + 1),
     DiceUnion = dice(2),
 
     {NextFeatures, NextAcc} =
         if
+            DiceReserved ->
+                {RestFeatures, maps:put(FeatureID, 'reserved', Acc)};
             %% Sets and Nested Schemas
             DiceNested, not DiceUnion, RestFeatures /= [] ->
                 do_generate_set_or_nested(Opts, CurrentFeatures, Acc);
@@ -290,6 +295,8 @@ entity(Schema) ->
 fill_schema(Schema) ->
     traverse_schema(
         fun
+            (reserved, Acc, _) ->
+                Acc;
             (value, Acc, RevPath) ->
                 %% TODO: applicable term()s generation
                 %% %% TODO?: sparsity (how many are not defined)
@@ -346,6 +353,8 @@ assert_correct_read(Schema, Features, Entity) ->
         fun
             (_, false, _) ->
                 false;
+            (reserved, Acc, _) ->
+                Acc;
             ({nested, _}, Acc, _) ->
                 Acc;
             (Kind, true, RevPath) ->
@@ -575,6 +584,8 @@ assert_correct_compare_union(Id, Name, DiscriminatorName, VariantPathSpecs, Unio
 pathspecs(Schema) ->
     traverse_schema(
         fun
+            (reserved, Acc, _) ->
+                Acc;
             (value, Acc, [{Id, Name} | _]) ->
                 [{value, Id, Name} | Acc];
             ({nested, NestedSchema}, Acc, [{Id, Name} | _]) ->
@@ -626,6 +637,8 @@ random_pathspecs_for_change(Schema) ->
 do_random_pathspecs_for_change(ForceNonEmptyInit, Prob, Schema) ->
     traverse_schema(
         fun
+            (reserved, Acc, _) ->
+                Acc;
             (value, {ForceNonEmpty, Acc}, [{Id, Name} | _]) ->
                 case ForceNonEmpty orelse dice(Prob) of
                     true ->
@@ -693,6 +706,8 @@ do_random_pathspecs_for_change(ForceNonEmptyInit, Prob, Schema) ->
 schema_score(Schema) ->
     traverse_schema(
         fun
+            (reserved, Acc, _) ->
+                Acc;
             (value, Acc, _) ->
                 Acc + 1;
             ({nested, _}, Acc, _) ->
@@ -714,6 +729,8 @@ do_random_nonexistent_pathspecs(Schema) ->
     %% TODO: base on rand number up to schema complexity: total number of nodes and leafs
     traverse_schema(
         fun
+            (reserved, Acc, _) ->
+                Acc;
             (value, Acc, [{Id, _Name} | _]) ->
                 case dice(2) of
                     true ->

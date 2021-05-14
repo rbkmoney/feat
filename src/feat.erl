@@ -9,9 +9,10 @@
 -type feature_name() :: integer().
 -type feature_value() :: integer() | features() | [feature_value()] | undefined.
 -type features() :: #{feature_name() := feature_value()}.
+-type request_schema() :: schema() | {set, schema()}.
 -type schema() ::
     #{
-        feature_name() := [request_key() | schema() | {set, schema()}]
+        feature_name() := [request_key() | request_schema() | 'reserved']
     }
     | #{
         ?discriminator := [request_key()],
