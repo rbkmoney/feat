@@ -64,6 +64,7 @@ read_(_, undefined, _Handler) ->
     undefined;
 read_({set, Schema}, RequestList, Handler) when is_map(Schema) and is_list(RequestList) ->
     {_, ListIndex} = lists:foldl(fun(Item, {N, Acc}) -> {N + 1, [{N, Item} | Acc]} end, {0, []}, RequestList),
+
     ListSorted = lists:keysort(2, ListIndex),
     lists:foldl(
         fun({Index, Req}, Acc) ->
@@ -77,7 +78,7 @@ read_({set, Schema}, RequestList, Handler) when is_map(Schema) and is_list(Reque
     );
 read_(UnionSchema = #{?discriminator := DiscriminatorAccessor}, Request, Handler) ->
     DiscriminatorValue =
-        read_request_value(
+        read_hashed_request_value(
             wrap_accessor(DiscriminatorAccessor),
             Request,
             Handler
@@ -88,39 +89,51 @@ read_(UnionSchema = #{?discriminator := DiscriminatorAccessor}, Request, Handler
             VariantValue = read_(Schema, Request, Handler),
             Acc#{Name => VariantValue}
         end,
-        #{?discriminator => hash(DiscriminatorValue)},
+        #{?discriminator => DiscriminatorValue},
         maps:remove(?discriminator, UnionSchema)
     );
 read_(Schema, Request, Handler) when is_map(Schema) ->
-    Result = maps:fold(
+    maps:fold(
         fun
             (_Name, 'reserved', Acc) ->
                 Acc;
             (Name, {Accessor, NestedSchema}, Acc) ->
                 AccessorList = wrap_accessor(Accessor),
-                NestedRequest = read_request_value(AccessorList, Request, Handler),
+                NestedRequest = read_raw_request_value(AccessorList, Request, Handler),
                 Value = read_(NestedSchema, NestedRequest, Handler),
                 Acc#{Name => Value};
             (Name, Accessor, Acc) ->
                 AccessorList = wrap_accessor(Accessor),
-                FeatureValue = read_request_value(AccessorList, Request, Handler),
-                Acc#{Name => hash(FeatureValue)}
+                FeatureValue = read_hashed_request_value(AccessorList, Request, Handler),
+                Acc#{Name => FeatureValue}
         end,
         #{},
         Schema
-    ),
-    Result.
+    ).
 
-read_request_value([], undefined, _) ->
-    undefined;
+read_raw_request_value(Accessor, Request, Handler) ->
+    case read_request_value(Accessor, Request, Handler) of
+        {ok, Value} -> Value;
+        undefined -> undefined
+    end.
+read_hashed_request_value(Accessor, Request, Handler) ->
+    case read_request_value(Accessor, Request, Handler) of
+        {ok, Value} -> hash(Value);
+        undefined -> undefined
+    end.
+
 read_request_value([], Value, _) ->
-    Value;
+    {ok, Value};
 read_request_value([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
-    SubRequest = maps:get(Key, Request, undefined),
-    handle_event(get_event_handler(Handler), {request_key_visit, {key, Key, SubRequest}}),
-    Value = read_request_value(Rest, SubRequest, Handler),
-    handle_event(get_event_handler(Handler), {request_key_visited, {key, Key}}),
-    Value;
+    case maps:find(Key, Request) of
+        {ok, SubRequest} ->
+            handle_event(get_event_handler(Handler), {request_key_visit, {key, Key, SubRequest}}),
+            Result = read_request_value(Rest, SubRequest, Handler),
+            handle_event(get_event_handler(Handler), {request_key_visited, {key, Key}}),
+            Result;
+        error ->
+            undefined
+    end;
 read_request_value(_, undefined, _) ->
     undefined;
 read_request_value(Key, Request, Handler) ->
@@ -179,6 +192,21 @@ list_diff_fields_(Diffs, {set, Schema}, Acc) when is_map(Schema) ->
         Acc,
         Diffs
     );
+%% If discriminator is different, diff would've been minimized because of it:
+%% => implying, discriminator is not different here
+list_diff_fields_(Diff, Schema = #{?discriminator := _}, Acc) ->
+    zipfold(
+        fun
+            (Variant, ?difference, _Schema, {PathsAcc, PathRev}) ->
+                {[lists:reverse([Variant | PathRev]) | PathsAcc], PathRev};
+            (_Variant, VariantDiff, VariantSchema, {_PathsAcc, PathRev} = AccIn) ->
+                {NewPathsAcc, _NewPathRev} = list_diff_fields_(VariantDiff, VariantSchema, AccIn),
+                {NewPathsAcc, PathRev}
+        end,
+        Acc,
+        Diff,
+        Schema
+    );
 list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
     zipfold(
         fun
@@ -195,7 +223,7 @@ list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
     );
 list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
     Path = read_accessor(Accessor),
-    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ [PathRev]});
+    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev});
 list_diff_fields_(?difference, Accessor, {PathsAcc, PathRev}) ->
     Path = read_accessor(Accessor),
     FullPath = lists:reverse(PathRev) ++ Path,
@@ -279,11 +307,8 @@ compare_nested_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_
             % Different with regard to discriminator, semantically same as different everywhere.
             Diff#{Key => ?difference};
         % different everywhere
-        NestedDiff when map_size(NestedDiff) > 0 ->
-            Diff#{Key => minimize_diff(NestedDiff)};
-        #{} ->
-            % no notable differences
-            Diff
+        NestedDiff when is_map(NestedDiff) ->
+            Diff#{Key => minimize_diff(NestedDiff)}
     end.
 
 minimize_diff(?difference) ->
@@ -291,23 +316,35 @@ minimize_diff(?difference) ->
 minimize_diff(EmptyDiff) when map_size(EmptyDiff) == 0 ->
     #{};
 minimize_diff(Diff) ->
-    case complex_diff_count(Diff) of
-        0 ->
-            ?difference;
-        _ ->
-            Diff
-    end.
+    %% CC = Complex diff Count
+    {CC, TruncatedDiff} =
+        maps:fold(
+            fun(Key, NestedDiff, {CC, DiffAcc}) ->
+                NewCC =
+                    case {Key, NestedDiff} of
+                        {?discriminator, _} -> CC;
+                        {_, ?difference} -> CC;
+                        {_, _} -> CC + 1
+                    end,
+                NewDiffAcc =
+                    if
+                        map_size(NestedDiff) == 0 ->
+                            maps:remove(Key, DiffAcc);
+                        true ->
+                            DiffAcc
+                    end,
 
-complex_diff_count(Diff) ->
-    maps:fold(
-        fun
-            (?discriminator, _, Count) -> Count;
-            (_, ?difference, Count) -> Count;
-            (_, _, Count) -> Count + 1
-        end,
-        0,
-        Diff
-    ).
+                {NewCC, NewDiffAcc}
+            end,
+            {0, Diff},
+            Diff
+        ),
+    if
+        CC == 0, map_size(TruncatedDiff) /= 0 ->
+            ?difference;
+        true ->
+            TruncatedDiff
+    end.
 
 zipfold(Fun, Acc, M1, M2) ->
     maps:fold(
@@ -322,3 +359,152 @@ zipfold(Fun, Acc, M1, M2) ->
         Acc,
         M1
     ).
+
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+
+-spec test() -> _.
+
+%% Serves as an example of the syntax
+-define(SCHEMA, #{
+    1 =>
+        {<<"1">>,
+            {set, #{
+                ?discriminator => [<<"meta">>, <<"type">>],
+                2 => #{
+                    21 => <<"21">>,
+                    22 => 'reserved'
+                },
+                3 => #{
+                    31 => {<<"31">>, {set, #{311 => <<"311">>}}}
+                }
+            }}}
+}).
+
+-define(REQUEST, #{
+    <<"1">> => [
+        #{
+            <<"meta">> => #{<<"type">> => <<"a">>},
+            <<"21">> => <<"a_21">>,
+            <<"unused">> => 42
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"b">>},
+            <<"21">> => <<"b_21">>,
+            <<"unused">> => 42
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"c">>},
+            <<"31">> => [
+                #{<<"311">> => <<"c_311_1">>},
+                #{<<"311">> => <<"c_311_2">>}
+            ]
+        },
+        #{<<"meta">> => #{<<"type">> => <<"unchanged">>}}
+    ]
+}).
+
+-define(OTHER_REQUEST, #{
+    <<"1">> => [
+        #{
+            <<"meta">> => #{<<"type">> => <<"AAA">>},
+            <<"21">> => <<"a_21">>,
+            <<"unused">> => 43
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"b">>},
+            <<"21">> => <<"b_21_other">>,
+            <<"unused">> => 43
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"c">>},
+            <<"31">> => [
+                #{<<"311">> => <<"c_311_1_other">>},
+                #{<<"311">> => <<"c_311_2">>}
+            ]
+        },
+        #{<<"meta">> => #{<<"type">> => <<"unchanged">>}}
+    ]
+}).
+
+-spec simple_featurefull_schema_read_test() -> _.
+simple_featurefull_schema_read_test() ->
+    ?assertEqual(
+        #{
+            1 => [
+                [
+                    1,
+                    #{
+                        ?discriminator => hash(<<"b">>),
+                        2 => #{21 => hash(<<"b_21">>)},
+                        3 => #{31 => undefined}
+                    }
+                ],
+                [
+                    0,
+                    #{
+                        ?discriminator => hash(<<"a">>),
+                        2 => #{21 => hash(<<"a_21">>)},
+                        3 => #{31 => undefined}
+                    }
+                ],
+                [
+                    2,
+                    #{
+                        ?discriminator => hash(<<"c">>),
+                        2 => #{
+                            21 => undefined
+                        },
+                        3 => #{
+                            31 => [
+                                [1, #{311 => hash(<<"c_311_2">>)}],
+                                [0, #{311 => hash(<<"c_311_1">>)}]
+                            ]
+                        }
+                    }
+                ],
+                [
+                    3,
+                    #{
+                        -1 => 97728684,
+                        2 => #{21 => undefined},
+                        3 => #{31 => undefined}
+                    }
+                ]
+            ]
+        },
+        read(?SCHEMA, ?REQUEST)
+    ).
+
+-spec simple_featurefull_schema_compare_test() -> _.
+simple_featurefull_schema_compare_test() ->
+    ?assertEqual(
+        {false, #{
+            1 => #{
+                0 => -1,
+                1 => #{2 => -1},
+                2 => #{3 => #{31 => #{0 => -1}}}
+            }
+        }},
+        begin
+            Features = read(?SCHEMA, ?REQUEST),
+            OtherFeatures = read(?SCHEMA, ?OTHER_REQUEST),
+
+            compare(Features, OtherFeatures)
+        end
+    ).
+
+-spec simple_featurefull_schema_list_diff_fields_test() -> _.
+simple_featurefull_schema_list_diff_fields_test() ->
+    ?assertEqual(
+        [<<"1.0">>, <<"1.1.2">>, <<"1.2.31.0">>],
+        begin
+            Features = read(?SCHEMA, ?REQUEST),
+            OtherFeatures = read(?SCHEMA, ?OTHER_REQUEST),
+
+            {false, Diff} = compare(Features, OtherFeatures),
+            list_diff_fields(?SCHEMA, Diff)
+        end
+    ).
+
+-endif.

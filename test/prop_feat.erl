@@ -58,7 +58,6 @@ prop_compare_same() ->
                     begin
                         Features1 = feat:read(Schema, Entity1),
                         Features2 = feat:read(Schema, Entity2),
-
                         ?assertEqual(true, feat:compare(Features1, Features2)),
                         true
                     end
@@ -1064,10 +1063,12 @@ do_pathspec_to_binpath({value, Id, Name}, Diff) ->
         _ -> []
     end;
 do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
-    case maps:get(Id, Diff) of
-        ?difference ->
+    case maps:find(Id, Diff) of
+        error ->
+            [];
+        {ok, ?difference} ->
             [[Name]];
-        NestedDiff ->
+        {ok, NestedDiff} ->
             lists:flatmap(
                 fun(PathSpec) ->
                     lists:map(
@@ -1081,10 +1082,12 @@ do_pathspec_to_binpath({nested, Id, Name, NestedPaths, _NestedSchema}, Diff) ->
             )
     end;
 do_pathspec_to_binpath({set, Id, Name, _NestedPaths, NestedSchema}, Diff) ->
-    case maps:get(Id, Diff) of
-        ?difference ->
+    case maps:find(Id, Diff) of
+        error ->
+            [];
+        {ok, ?difference} ->
             [[Name]];
-        SetDiff ->
+        {ok, SetDiff} ->
             %% For each element of set
             lists:flatmap(
                 fun
