@@ -36,6 +36,7 @@ prop_read() ->
             entity(Schema),
             begin
                 Features = feat:read(Schema, Entity),
+
                 is_map(Features) andalso
                     assert_correct_read(Schema, Features, Entity)
             end
@@ -183,7 +184,7 @@ do_generate_schema(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatu
                 do_generate_union(Opts, CurrentFeatures, Acc);
             %% Simple Value
             true ->
-                {RestFeatures, maps:put(FeatureID, [FeatureName], Acc)}
+                {RestFeatures, maps:put(FeatureID, FeatureName, Acc)}
         end,
     do_generate_schema(Opts, NextFeatures, NextAcc).
 
@@ -203,12 +204,12 @@ do_generate_set_or_nested(Opts, CurrentFeatures = [{FeatureID, FeatureName} | Re
             {CurrentFeatures, Acc};
         _ ->
             DiceIsSet = dice(2),
-            Value =
+            RequestSchema =
                 case DiceIsSet of
                     true -> {set, NestedSchema};
                     false -> NestedSchema
                 end,
-            {LeftFeatures, maps:put(FeatureID, [FeatureName, Value], Acc)}
+            {LeftFeatures, maps:put(FeatureID, {FeatureName, RequestSchema}, Acc)}
     end.
 
 do_generate_union(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatures], Acc) ->
@@ -243,7 +244,7 @@ do_generate_union(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatur
                     _ -> maps:put(VariantFeatureID, VariantSchema, UnionAcc)
                 end
             end,
-            #{?discriminator => [DiscriminatorName]},
+            #{?discriminator => DiscriminatorName},
             lists:zip(
                 VariantFeatures,
                 lists_split_randomly(VariantCount, VariantSchemaFeatures)
@@ -253,7 +254,7 @@ do_generate_union(Opts, CurrentFeatures = [{FeatureID, FeatureName} | RestFeatur
     %% If generation used features but produced almost empty union schema -- skip this iteration
     case map_size(UnionSchema) == 1 andalso VariantFeatures /= [] andalso VariantSchemaFeatures /= [] of
         true -> {CurrentFeatures, Acc};
-        false -> {NextRestFeatures, maps:put(FeatureID, [FeatureName, UnionSchema], Acc)}
+        false -> {NextRestFeatures, maps:put(FeatureID, {FeatureName, UnionSchema}, Acc)}
     end.
 
 features(Size) ->
@@ -335,12 +336,11 @@ fill_schema(Schema) ->
                 Value = maps:put(DiscriminatorName, DiscriminatorValue, UnionVariant),
 
                 NamePath = name_path(lists:reverse(RevPath)),
-                NextAcc =
-                    case deep_force_put(NamePath, Value, Acc) of
-                        {ok, NewAcc} -> NewAcc;
-                        {error, map_overwrite} -> Acc
-                    end,
-                NextAcc;
+
+                case deep_force_put(NamePath, Value, Acc) of
+                    {ok, NewAcc} -> NewAcc;
+                    {error, map_overwrite} -> Acc
+                end;
             (_, Acc, _RevPath) ->
                 Acc
         end,
@@ -353,7 +353,7 @@ assert_correct_read(Schema, Features, Entity) ->
         fun
             (_, false, _) ->
                 false;
-            (reserved, Acc, _) ->
+            ('reserved', Acc, _) ->
                 Acc;
             ({nested, _}, Acc, _) ->
                 Acc;
@@ -401,6 +401,7 @@ assert_correct_read(Schema, Features, Entity) ->
                                 true,
                                 lists:zip(NestedFeatures, NestedEntities)
                             ),
+
                         {no_traverse, Result};
                     {{union, _DiscriminatorName, _UnionSchema}, {ok, undefined, _NestedValues}} ->
                         %% Inside recursive union comparison: there's a field with the same noun

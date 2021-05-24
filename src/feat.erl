@@ -9,13 +9,14 @@
 -type feature_name() :: integer().
 -type feature_value() :: integer() | features() | [feature_value()] | undefined.
 -type features() :: #{feature_name() := feature_value()}.
+-type accessor() :: request_key() | nonempty_list(request_key()).
 -type request_schema() :: schema() | {set, schema()}.
 -type schema() ::
     #{
-        feature_name() := [request_key() | request_schema() | 'reserved']
+        feature_name() := accessor() | {accessor(), request_schema()} | 'reserved'
     }
     | #{
-        ?discriminator := [request_key()],
+        ?discriminator := request_key(),
         feature_name() := schema()
     }.
 -type difference() :: ?difference | #{request_key() := difference()}.
@@ -59,31 +60,10 @@ read(Handler, Schema, Request) ->
     handle_event(get_event_handler(Handler), {request_visited, {request, Request}}),
     read_(Schema, Request, Handler).
 
-read_(Schema, Request, Handler) ->
-    Result = maps:fold(
-        fun
-            (Name, Fs, Acc) when is_map(Fs) ->
-                Value = read_(Fs, Request, Handler),
-                Acc#{Name => Value};
-            (Name, Accessor, Acc) when is_list(Accessor) ->
-                FeatureValue = read_request_value(Accessor, Request, Handler),
-                Acc#{Name => FeatureValue};
-            (_Name, 'reserved', Acc) ->
-                Acc
-        end,
-        #{},
-        Schema
-    ),
-    Result.
-
-read_request_value([], undefined, _) ->
+read_(_, undefined, _Handler) ->
     undefined;
-read_request_value([], Value, _) ->
-    hash(Value);
-read_request_value([Schema = #{}], Request = #{}, Handler) ->
-    read_(Schema, Request, Handler);
-read_request_value([{set, Schema = #{}}], List, Handler) when is_list(List) ->
-    {_, ListIndex} = lists:foldl(fun(Item, {N, Acc}) -> {N + 1, [{N, Item} | Acc]} end, {0, []}, List),
+read_({set, Schema}, RequestList, Handler) when is_map(Schema) and is_list(RequestList) ->
+    {_, ListIndex} = lists:foldl(fun(Item, {N, Acc}) -> {N + 1, [{N, Item} | Acc]} end, {0, []}, RequestList),
     ListSorted = lists:keysort(2, ListIndex),
     lists:foldl(
         fun({Index, Req}, Acc) ->
@@ -95,6 +75,46 @@ read_request_value([{set, Schema = #{}}], List, Handler) when is_list(List) ->
         [],
         ListSorted
     );
+read_(UnionSchema = #{?discriminator := DiscriminatorAccessor}, Request, Handler) ->
+    DiscriminatorValue =
+        read_request_value(
+            wrap_accessor(DiscriminatorAccessor),
+            Request,
+            Handler
+        ),
+
+    maps:fold(
+        fun(Name, Schema, Acc) ->
+            VariantValue = read_(Schema, Request, Handler),
+            Acc#{Name => VariantValue}
+        end,
+        #{?discriminator => hash(DiscriminatorValue)},
+        maps:remove(?discriminator, UnionSchema)
+    );
+read_(Schema, Request, Handler) when is_map(Schema) ->
+    Result = maps:fold(
+        fun
+            (_Name, 'reserved', Acc) ->
+                Acc;
+            (Name, {Accessor, NestedSchema}, Acc) ->
+                AccessorList = wrap_accessor(Accessor),
+                NestedRequest = read_request_value(AccessorList, Request, Handler),
+                Value = read_(NestedSchema, NestedRequest, Handler),
+                Acc#{Name => Value};
+            (Name, Accessor, Acc) ->
+                AccessorList = wrap_accessor(Accessor),
+                FeatureValue = read_request_value(AccessorList, Request, Handler),
+                Acc#{Name => hash(FeatureValue)}
+        end,
+        #{},
+        Schema
+    ),
+    Result.
+
+read_request_value([], undefined, _) ->
+    undefined;
+read_request_value([], Value, _) ->
+    Value;
 read_request_value([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
     SubRequest = maps:get(Key, Request, undefined),
     handle_event(get_event_handler(Handler), {request_key_visit, {key, Key, SubRequest}}),
@@ -162,8 +182,8 @@ list_diff_fields_(Diffs, {set, Schema}, Acc) when is_map(Schema) ->
 list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
     zipfold(
         fun
-            (_Feature, ?difference, [Key | _SchemaPart], {PathsAcc, PathRev}) ->
-                Path = lists:reverse([Key | PathRev]),
+            (_Feature, ?difference, SchemaPart, {PathsAcc, PathRev}) ->
+                Path = lists:reverse(PathRev) ++ get_path(SchemaPart),
                 {[Path | PathsAcc], PathRev};
             (_Feature, DiffPart, SchemaPart, {_PathsAcc, PathRev} = AccIn) ->
                 {NewPathsAcc, _NewPathRev} = list_diff_fields_(DiffPart, SchemaPart, AccIn),
@@ -173,10 +193,31 @@ list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
         Diff,
         Schema
     );
-list_diff_fields_(Diff, [Schema], Acc) ->
-    list_diff_fields_(Diff, Schema, Acc);
-list_diff_fields_(Diff, [Key | Schema], {PathsAcc, PathRev}) ->
-    list_diff_fields_(Diff, Schema, {PathsAcc, [Key | PathRev]}).
+list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
+    Path = read_accessor(Accessor),
+    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ [PathRev]});
+list_diff_fields_(?difference, Accessor, {PathsAcc, PathRev}) ->
+    Path = read_accessor(Accessor),
+    FullPath = lists:reverse(PathRev) ++ Path,
+    {[FullPath | PathsAcc], PathRev}.
+
+wrap_accessor(Accessor) ->
+    if
+        is_list(Accessor) ->
+            Accessor;
+        is_binary(Accessor) ->
+            [Accessor]
+    end.
+
+get_path({Accessor, _Schema}) ->
+    read_accessor(Accessor);
+get_path(Accessor) ->
+    read_accessor(Accessor).
+
+read_accessor(Key) when is_binary(Key) ->
+    [Key];
+read_accessor(Keys) when is_list(Keys) ->
+    Keys.
 
 -spec compare(features(), features()) -> true | {false, difference()}.
 compare(Features, FeaturesWith) ->

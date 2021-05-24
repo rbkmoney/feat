@@ -33,13 +33,13 @@ do_traverse_schema(Fun, Acc, Schema, RevPath) ->
         fun
             (Id, 'reserved', CurrentAcc) ->
                 Fun(reserved, CurrentAcc, [{Id, Id} | RevPath]);
-            (Id, [Name, UnionSchema = #{?discriminator := [DiscriminatorName]}], CurrentAcc) ->
+            (Id, {Name, UnionSchema = #{?discriminator := DiscriminatorName}}, CurrentAcc) ->
                 %% TODO: no_traverse here?
                 Fun({union, DiscriminatorName, maps:remove(?discriminator, UnionSchema)}, CurrentAcc, [
                     {Id, Name}
                     | RevPath
                 ]);
-            (Id, [Name, Value], CurrentAcc) ->
+            (Id, {Name, Value}, CurrentAcc) ->
                 NextRevPath = [{Id, Name} | RevPath],
                 Arg =
                     {_, NestedSchema} =
@@ -55,7 +55,7 @@ do_traverse_schema(Fun, Acc, Schema, RevPath) ->
                     NewAcc ->
                         do_traverse_schema(Fun, NewAcc, NestedSchema, NextRevPath)
                 end;
-            (Id, [Name], CurrentAcc) ->
+            (Id, Name, CurrentAcc) ->
                 Fun(value, CurrentAcc, [{Id, Name} | RevPath])
         end,
         Acc,
