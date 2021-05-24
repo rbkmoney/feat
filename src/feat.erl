@@ -19,7 +19,7 @@
         ?discriminator := request_key(),
         feature_name() := schema()
     }.
--type difference() :: ?difference | #{request_key() := difference()}.
+-type difference() :: ?difference | #{feature_name() := difference()}.
 
 -type event() ::
     {invalid_schema_fragment, feature_name(), request()}
