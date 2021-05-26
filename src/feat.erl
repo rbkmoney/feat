@@ -222,10 +222,10 @@ list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
         Schema
     );
 list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
-    Path = read_accessor(Accessor),
+    Path = accessor_to_path(Accessor),
     list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev});
 list_diff_fields_(?difference, Accessor, {PathsAcc, PathRev}) ->
-    Path = read_accessor(Accessor),
+    Path = accessor_to_path(Accessor),
     FullPath = lists:reverse(PathRev) ++ Path,
     {[FullPath | PathsAcc], PathRev}.
 
@@ -238,13 +238,13 @@ wrap_accessor(Accessor) ->
     end.
 
 get_path({Accessor, _Schema}) ->
-    read_accessor(Accessor);
+    accessor_to_path(Accessor);
 get_path(Accessor) ->
-    read_accessor(Accessor).
+    accessor_to_path(Accessor).
 
-read_accessor(Key) when is_binary(Key) ->
+accessor_to_path(Key) when is_binary(Key) ->
     [Key];
-read_accessor(Keys) when is_list(Keys) ->
+accessor_to_path(Keys) when is_list(Keys) ->
     Keys.
 
 -spec compare(features(), features()) -> true | {false, difference()}.
