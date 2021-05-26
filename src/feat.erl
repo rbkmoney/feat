@@ -223,11 +223,7 @@ list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
     );
 list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
     Path = accessor_to_path(Accessor),
-    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev});
-list_diff_fields_(?difference, Accessor, {PathsAcc, PathRev}) ->
-    Path = accessor_to_path(Accessor),
-    FullPath = lists:reverse(PathRev) ++ Path,
-    {[FullPath | PathsAcc], PathRev}.
+    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev}).
 
 wrap_accessor(Accessor) ->
     if
