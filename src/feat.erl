@@ -284,12 +284,7 @@ compare_list_features(Key, L1, L2, Diff) when length(L1) =/= length(L2) ->
     Diff#{Key => ?difference};
 compare_list_features(Key, L1, L2, Acc) ->
     Diff = compare_list_features_(L1, L2, #{}),
-    case Diff of
-        _ when map_size(Diff) > 0 ->
-            Acc#{Key => minimize_diff(Diff)};
-        #{} ->
-            Acc
-    end.
+    Acc#{Key => minimize_diff(Diff)}.
 
 compare_list_features_([], [], Diff) ->
     Diff;
@@ -373,6 +368,14 @@ zipfold(Fun, Acc, M1, M2) ->
                 },
                 3 => #{
                     31 => {<<"31">>, {set, #{311 => <<"311">>}}}
+                },
+                %% Tests correct list diff minimization
+                4 => #{
+                    41 =>
+                        {<<"41">>, #{
+                            411 => {<<"411">>, {set, #{}}},
+                            412 => <<"412">>
+                        }}
                 }
             }}}
 }).
@@ -395,6 +398,13 @@ zipfold(Fun, Acc, M1, M2) ->
                 #{<<"311">> => <<"c_311_1">>},
                 #{<<"311">> => <<"c_311_2">>}
             ]
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"d">>},
+            <<"41">> => #{
+                <<"411">> => [],
+                <<"412">> => <<"d_412">>
+            }
         },
         #{<<"meta">> => #{<<"type">> => <<"unchanged">>}}
     ]
@@ -419,7 +429,16 @@ zipfold(Fun, Acc, M1, M2) ->
                 #{<<"311">> => <<"c_311_2">>}
             ]
         },
-        #{<<"meta">> => #{<<"type">> => <<"unchanged">>}}
+        #{
+            <<"meta">> => #{<<"type">> => <<"d">>},
+            <<"41">> => #{
+                <<"411">> => [],
+                <<"412">> => <<"d_412_other">>
+            }
+        },
+        #{
+            <<"meta">> => #{<<"type">> => <<"unchanged">>}
+        }
     ]
 }).
 
@@ -433,7 +452,8 @@ simple_featurefull_schema_read_test() ->
                     #{
                         ?discriminator => hash(<<"b">>),
                         2 => #{21 => hash(<<"b_21">>)},
-                        3 => #{31 => undefined}
+                        3 => #{31 => undefined},
+                        4 => #{41 => undefined}
                     }
                 ],
                 [
@@ -441,9 +461,20 @@ simple_featurefull_schema_read_test() ->
                     #{
                         ?discriminator => hash(<<"a">>),
                         2 => #{21 => hash(<<"a_21">>)},
-                        3 => #{31 => undefined}
+                        3 => #{31 => undefined},
+                        4 => #{41 => undefined}
                     }
                 ],
+                [
+                    3,
+                    #{
+                        -1 => 109142861,
+                        2 => #{21 => undefined},
+                        3 => #{31 => undefined},
+                        4 => #{41 => #{411 => [], 412 => hash(<<"d_412">>)}}
+                    }
+                ],
+
                 [
                     2,
                     #{
@@ -456,15 +487,17 @@ simple_featurefull_schema_read_test() ->
                                 [1, #{311 => hash(<<"c_311_2">>)}],
                                 [0, #{311 => hash(<<"c_311_1">>)}]
                             ]
-                        }
+                        },
+                        4 => #{41 => undefined}
                     }
                 ],
                 [
-                    3,
+                    4,
                     #{
-                        ?discriminator => 97728684,
+                        ?discriminator => hash(<<"unchanged">>),
                         2 => #{21 => undefined},
-                        3 => #{31 => undefined}
+                        3 => #{31 => undefined},
+                        4 => #{41 => undefined}
                     }
                 ]
             ]
@@ -479,7 +512,8 @@ simple_featurefull_schema_compare_test() ->
             1 => #{
                 0 => ?difference,
                 1 => #{2 => ?difference},
-                2 => #{3 => #{31 => #{0 => ?difference}}}
+                2 => #{3 => #{31 => #{0 => ?difference}}},
+                3 => #{4 => #{41 => #{412 => ?difference}}}
             }
         }},
         begin
@@ -493,7 +527,7 @@ simple_featurefull_schema_compare_test() ->
 -spec simple_featurefull_schema_list_diff_fields_test() -> _.
 simple_featurefull_schema_list_diff_fields_test() ->
     ?assertEqual(
-        [<<"1.0">>, <<"1.1.2">>, <<"1.2.31.0">>],
+        [<<"1.0">>, <<"1.1.2">>, <<"1.2.31.0">>, <<"1.3.41.412">>],
         begin
             Features = read(?SCHEMA, ?REQUEST),
             OtherFeatures = read(?SCHEMA, ?OTHER_REQUEST),
