@@ -462,7 +462,7 @@ simple_featurefull_schema_read_test() ->
                 [
                     3,
                     #{
-                        -1 => 97728684,
+                        ?discriminator => 97728684,
                         2 => #{21 => undefined},
                         3 => #{31 => undefined}
                     }
@@ -477,9 +477,9 @@ simple_featurefull_schema_compare_test() ->
     ?assertEqual(
         {false, #{
             1 => #{
-                0 => -1,
-                1 => #{2 => -1},
-                2 => #{3 => #{31 => #{0 => -1}}}
+                0 => ?difference,
+                1 => #{2 => ?difference},
+                2 => #{3 => #{31 => #{0 => ?difference}}}
             }
         }},
         begin
