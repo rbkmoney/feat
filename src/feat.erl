@@ -290,6 +290,9 @@ compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], DiffAcc) 
     NewDiffAcc = DiffAcc#{Index => compare_features(V1, V2)},
     compare_list_features_(Values, ValuesWith, NewDiffAcc).
 
+%% This minimization function does two things:
+%% 1. It checks if diff is completely different everywhere (all fields of first level have ?difference as value)
+%% 2. Removes all no-diff markers (empty maps: #{}) from diff
 minimize_diff(?difference) ->
     ?difference;
 minimize_diff(EmptyDiff) when map_size(EmptyDiff) == 0 ->
@@ -301,32 +304,37 @@ minimize_diff(Diff) ->
     %% CC = Complex diff Count
     {CC, TruncatedDiff} =
         maps:fold(
-            fun(Key, NestedDiff, {CC, DiffAcc}) ->
-                NewCC =
-                    case {Key, NestedDiff} of
-                        {?discriminator, _} -> CC;
-                        {_, ?difference} -> CC;
-                        {_, _} -> CC + 1
-                    end,
-                NewDiffAcc =
-                    if
-                        map_size(NestedDiff) == 0 ->
-                            maps:remove(Key, DiffAcc);
-                        true ->
-                            DiffAcc
-                    end,
-
-                {NewCC, NewDiffAcc}
+            fun(Key, NestedDiff, {CCAcc, DiffAcc}) ->
+                {
+                    acc_complex_diff_count(Key, NestedDiff, CCAcc),
+                    acc_truncated_diff(Key, NestedDiff, DiffAcc)
+                }
             end,
             {0, Diff},
             Diff
         ),
     if
+        %% If p.1 results in 0, it means that there's no information lost if diff:
+        %% It's safe to replace entire diff with simple ?difference
         CC == 0, map_size(TruncatedDiff) /= 0 ->
             ?difference;
+        %% Otherwise, diff with removed no-diff markers returned as a result
         true ->
             TruncatedDiff
     end.
+
+%% Technically the following clause is not required:
+%% the case is caught in a nested minimization.
+%% Left as a safety net for future changes
+%% TODO: remove when library is completed?
+acc_complex_diff_count(?discriminator, _, CCAcc) -> CCAcc;
+acc_complex_diff_count(_, ?difference, CCAcc) -> CCAcc;
+acc_complex_diff_count(_, _, CCAcc) -> CCAcc + 1.
+
+acc_truncated_diff(Key, NestedDiff, DiffAcc) when map_size(NestedDiff) == 0 ->
+    maps:remove(Key, DiffAcc);
+acc_truncated_diff(_, _, DiffAcc) ->
+    DiffAcc.
 
 zipfold(Fun, Acc, M1, M2) ->
     maps:fold(
