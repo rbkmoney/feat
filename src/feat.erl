@@ -255,57 +255,48 @@ compare(Features, FeaturesWith) ->
     end.
 
 compare_features(Fs, FsWith) ->
-    minimize_diff(compare_features_(Fs, FsWith)).
-
-compare_features_(Fs, FsWith) ->
-    zipfold(
-        fun
-            (Key, Values, ValuesWith, Diff) when is_list(ValuesWith), is_list(Values) ->
-                compare_list_features(Key, Values, ValuesWith, Diff);
-            (Key, Value, ValueWith, Diff) when is_map(ValueWith) and is_map(Value) ->
-                compare_nested_features_(Key, Value, ValueWith, Diff);
-            %% We expect that clients may _at any time_ change their implementation and start
-            %% sending information they were not sending beforehand, so this is not considered a
-            %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
-            %% information they were sending, this is still a conflict.
-            (_Key, _Value, undefined, Diff) ->
-                Diff;
-            (_Key, Value, Value, Diff) ->
-                Diff;
-            (Key, Value, ValueWith, Diff) when Value =/= ValueWith ->
-                Diff#{Key => ?difference}
-        end,
-        #{},
-        Fs,
-        FsWith
+    minimize_diff(
+        zipfold(
+            fun
+                (Key, Values, ValuesWith, Diff) when is_list(ValuesWith), is_list(Values) ->
+                    compare_list_features(Key, Values, ValuesWith, Diff);
+                (Key, Value, ValueWith, Diff) when is_map(ValueWith) and is_map(Value) ->
+                    Diff#{Key => compare_features(Value, ValueWith)};
+                %% We expect that clients may _at any time_ change their implementation and start
+                %% sending information they were not sending beforehand, so this is not considered a
+                %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
+                %% information they were sending, this is still a conflict.
+                (_Key, _Value, undefined, Diff) ->
+                    Diff;
+                (_Key, Value, Value, Diff) ->
+                    Diff;
+                (Key, Value, ValueWith, Diff) when Value =/= ValueWith ->
+                    Diff#{Key => ?difference}
+            end,
+            #{},
+            Fs,
+            FsWith
+        )
     ).
 
 compare_list_features(Key, L1, L2, Diff) when length(L1) =/= length(L2) ->
     Diff#{Key => ?difference};
 compare_list_features(Key, L1, L2, Acc) ->
-    Diff = compare_list_features_(L1, L2, #{}),
-    Acc#{Key => minimize_diff(Diff)}.
+    Acc#{Key => compare_list_features_(L1, L2, #{})}.
 
 compare_list_features_([], [], Diff) ->
-    Diff;
-compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
-    Diff = compare_nested_features_(Index, V1, V2, Acc),
-    compare_list_features_(Values, ValuesWith, Diff).
-
-compare_nested_features_(Key, Value, ValueWith, Diff) when is_map(Value) and is_map(ValueWith) ->
-    case compare_features_(Value, ValueWith) of
-        #{?discriminator := _} ->
-            % Different with regard to discriminator, semantically same as different everywhere.
-            Diff#{Key => ?difference};
-        % different everywhere
-        NestedDiff when is_map(NestedDiff) ->
-            Diff#{Key => minimize_diff(NestedDiff)}
-    end.
+    minimize_diff(Diff);
+compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], DiffAcc) ->
+    NewDiffAcc = DiffAcc#{Index => compare_features(V1, V2)},
+    compare_list_features_(Values, ValuesWith, NewDiffAcc).
 
 minimize_diff(?difference) ->
     ?difference;
 minimize_diff(EmptyDiff) when map_size(EmptyDiff) == 0 ->
     #{};
+%% Different with regard to discriminator, semantically same as different everywhere.
+minimize_diff(#{?discriminator := _}) ->
+    ?difference;
 minimize_diff(Diff) ->
     %% CC = Complex diff Count
     {CC, TruncatedDiff} =
