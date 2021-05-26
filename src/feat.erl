@@ -16,7 +16,7 @@
         feature_name() := accessor() | {accessor(), request_schema()} | 'reserved'
     }
     | #{
-        ?discriminator := request_key(),
+        ?discriminator := accessor(),
         feature_name() := schema()
     }.
 -type difference() :: ?difference | #{feature_name() := difference()}.
