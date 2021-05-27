@@ -79,7 +79,7 @@ read_({set, Schema}, RequestList, Handler) when is_map(Schema) and is_list(Reque
 read_(UnionSchema = #{?discriminator := DiscriminatorAccessor}, Request, Handler) ->
     DiscriminatorValue =
         read_hashed_request_value(
-            wrap_accessor(DiscriminatorAccessor),
+            DiscriminatorAccessor,
             Request,
             Handler
         ),
@@ -98,13 +98,11 @@ read_(Schema, Request, Handler) when is_map(Schema) ->
             (_Name, 'reserved', Acc) ->
                 Acc;
             (Name, {Accessor, NestedSchema}, Acc) ->
-                AccessorList = wrap_accessor(Accessor),
-                NestedRequest = read_raw_request_value(AccessorList, Request, Handler),
+                NestedRequest = read_raw_request_value(Accessor, Request, Handler),
                 Value = read_(NestedSchema, NestedRequest, Handler),
                 Acc#{Name => Value};
             (Name, Accessor, Acc) ->
-                AccessorList = wrap_accessor(Accessor),
-                FeatureValue = read_hashed_request_value(AccessorList, Request, Handler),
+                FeatureValue = read_hashed_request_value(Accessor, Request, Handler),
                 Acc#{Name => FeatureValue}
         end,
         #{},
@@ -122,21 +120,26 @@ read_hashed_request_value(Accessor, Request, Handler) ->
         undefined -> undefined
     end.
 
-read_request_value([], Value, _) ->
+read_request_value(Accessor, Value, Handler) when is_binary(Accessor) ->
+    read_request_value_([Accessor], Value, Handler);
+read_request_value(Accessor, Value, Handler) when is_list(Accessor) ->
+    read_request_value_(Accessor, Value, Handler).
+
+read_request_value_([], Value, _) ->
     {ok, Value};
-read_request_value([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
+read_request_value_([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
     case maps:find(Key, Request) of
         {ok, SubRequest} ->
             handle_event(get_event_handler(Handler), {request_key_visit, {key, Key, SubRequest}}),
-            Result = read_request_value(Rest, SubRequest, Handler),
+            Result = read_request_value_(Rest, SubRequest, Handler),
             handle_event(get_event_handler(Handler), {request_key_visited, {key, Key}}),
             Result;
         error ->
             undefined
     end;
-read_request_value(_, undefined, _) ->
+read_request_value_(_, undefined, _) ->
     undefined;
-read_request_value(Key, Request, Handler) ->
+read_request_value_(Key, Request, Handler) ->
     handle_event(get_event_handler(Handler), {invalid_schema_fragment, Key, Request}).
 
 handle_event(undefined, {invalid_schema_fragment, Key, Request}) ->
@@ -224,14 +227,6 @@ list_diff_fields_(Diff, Schema, Acc) when is_map(Schema) ->
 list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
     Path = accessor_to_path(Accessor),
     list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev}).
-
-wrap_accessor(Accessor) ->
-    if
-        is_list(Accessor) ->
-            Accessor;
-        is_binary(Accessor) ->
-            [Accessor]
-    end.
 
 get_path({Accessor, _Schema}) ->
     accessor_to_path(Accessor);
