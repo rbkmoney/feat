@@ -3,7 +3,7 @@
 -include("feat.hrl").
 
 -type request_key() :: binary().
--type request_value() :: integer() | binary() | request() | [request()].
+-type request_value() :: integer() | float() | binary() | request() | [request()] | undefined.
 -type request() :: #{request_key() := request_value()}.
 
 -type feature_name() :: integer().
