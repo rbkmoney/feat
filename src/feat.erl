@@ -255,86 +255,85 @@ compare(Features, FeaturesWith) ->
     end.
 
 compare_features(Fs, FsWith) ->
-    minimize_diff(
+    acc_to_diff(
         zipfold(
             fun
-                (Key, Values, ValuesWith, Diff) when is_list(ValuesWith), is_list(Values) ->
-                    compare_list_features(Key, Values, ValuesWith, Diff);
-                (Key, Value, ValueWith, Diff) when is_map(ValueWith) and is_map(Value) ->
-                    Diff#{Key => compare_features(Value, ValueWith)};
-                %% We expect that clients may _at any time_ change their implementation and start
-                %% sending information they were not sending beforehand, so this is not considered a
-                %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
-                %% information they were sending, this is still a conflict.
-                (_Key, _Value, undefined, Diff) ->
-                    Diff;
-                (_Key, Value, Value, Diff) ->
-                    Diff;
-                (Key, Value, ValueWith, Diff) when Value =/= ValueWith ->
-                    Diff#{Key => ?difference}
+                %% Perf: skip unnecessary iterations for unions
+                (_, _, _, ?difference) ->
+                    ?difference;
+                (Key, Value, ValueWith, Acc) ->
+                    Diff =
+                        if
+                            is_list(Value), is_list(ValueWith) ->
+                                compare_list_features(Value, ValueWith);
+                            is_map(Value), is_map(ValueWith) ->
+                                compare_features(Value, ValueWith);
+                            %% We expect that clients may _at any time_ change their implementation and start
+                            %% sending information they were not sending beforehand, so this is not considered a
+                            %% conflict. Yet, we DO NOT expect them to do the opposite, to stop sending
+                            %% information they were sending, this is still a conflict.
+                            ValueWith == undefined ->
+                                #{};
+                            Value == ValueWith ->
+                                #{};
+                            true ->
+                                ?difference
+                        end,
+
+                    accumulate(Key, Diff, Acc)
             end,
-            #{},
+            init_acc(),
             Fs,
             FsWith
         )
     ).
 
-compare_list_features(Key, L1, L2, Diff) when length(L1) =/= length(L2) ->
-    Diff#{Key => ?difference};
-compare_list_features(Key, L1, L2, Acc) ->
-    Acc#{Key => compare_list_features_(L1, L2, #{})}.
-
-compare_list_features_([], [], Diff) ->
-    minimize_diff(Diff);
-compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], DiffAcc) ->
-    NewDiffAcc = DiffAcc#{Index => compare_features(V1, V2)},
-    compare_list_features_(Values, ValuesWith, NewDiffAcc).
-
-%% This minimization function does two things:
-%% 1. It checks if diff is completely different everywhere (all fields of first level have ?difference as value)
-%% 2. Removes all no-diff markers (empty maps: #{}) from diff
-minimize_diff(?difference) ->
+compare_list_features(L1, L2) when length(L1) =/= length(L2) ->
     ?difference;
-minimize_diff(EmptyDiff) when map_size(EmptyDiff) == 0 ->
+compare_list_features(L1, L2) ->
+    compare_list_features_(L1, L2, init_acc()).
+
+compare_list_features_([], [], Acc) ->
+    acc_to_diff(Acc);
+compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
+    Diff = compare_features(V1, V2),
+    compare_list_features_(Values, ValuesWith, accumulate(Index, Diff, Acc)).
+
+%% Acc values
+%% 1. Usually {ActualDiffAcc, SimpleDiffCount} (simple diff = ?difference and not nested map)
+%% 2. ?difference if it's union schema with changed discriminator (to utilize optimization)
+init_acc() ->
+    {#{}, 0}.
+
+%% Pass-through for unions
+accumulate(_, _, ?difference) ->
+    ?difference;
+%% If union discriminator is different - semantically, entire union request is different
+%% ?difference marks that it's pointless to iterate further
+accumulate(?discriminator, ?difference, _) ->
+    ?difference;
+accumulate(Key, ?difference, {DiffAcc, SimpleCount}) ->
+    {DiffAcc#{Key => ?difference}, SimpleCount + 1};
+%% At least one value is the same: should show it in the result with level of detalization
+%% -1 is magic value-marker for this
+accumulate(_, EmptyDiff, {DiffAcc, _}) when map_size(EmptyDiff) == 0 ->
+    {DiffAcc, -1};
+accumulate(Key, Diff, {DiffAcc, SimpleCount}) ->
+    {DiffAcc#{Key => Diff}, SimpleCount}.
+
+acc_to_diff(?difference) ->
+    ?difference;
+acc_to_diff({DiffWithSameFields, -1}) ->
+    DiffWithSameFields;
+%% No nested diffs were added: technically, data is the same. Possible cases:
+%% 1. Nested schema is empty (w/o features)
+%% 2. It's a set schema with empty data in both requests
+acc_to_diff({EmptyDiff, 0}) when map_size(EmptyDiff) == 0 ->
     #{};
-%% Different with regard to discriminator, semantically same as different everywhere.
-minimize_diff(#{?discriminator := _}) ->
+acc_to_diff({SimpleDiff, SimpleCount}) when map_size(SimpleDiff) == SimpleCount ->
     ?difference;
-minimize_diff(Diff) ->
-    %% CC = Complex diff Count
-    {CC, TruncatedDiff} =
-        maps:fold(
-            fun(Key, NestedDiff, {CCAcc, DiffAcc}) ->
-                {
-                    acc_complex_diff_count(Key, NestedDiff, CCAcc),
-                    acc_truncated_diff(Key, NestedDiff, DiffAcc)
-                }
-            end,
-            {0, Diff},
-            Diff
-        ),
-    if
-        %% If p.1 results in 0, it means that there's no information lost if diff:
-        %% It's safe to replace entire diff with simple ?difference
-        CC == 0, map_size(TruncatedDiff) /= 0 ->
-            ?difference;
-        %% Otherwise, diff with removed no-diff markers returned as a result
-        true ->
-            TruncatedDiff
-    end.
-
-%% Technically the following clause is not required:
-%% the case is caught in a nested minimization.
-%% Left as a safety net for future changes
-%% TODO: remove when library is completed?
-acc_complex_diff_count(?discriminator, _, CCAcc) -> CCAcc;
-acc_complex_diff_count(_, ?difference, CCAcc) -> CCAcc;
-acc_complex_diff_count(_, _, CCAcc) -> CCAcc + 1.
-
-acc_truncated_diff(Key, NestedDiff, DiffAcc) when map_size(NestedDiff) == 0 ->
-    maps:remove(Key, DiffAcc);
-acc_truncated_diff(_, _, DiffAcc) ->
-    DiffAcc.
+acc_to_diff({Diff, _}) ->
+    Diff.
 
 zipfold(Fun, Acc, M1, M2) ->
     maps:fold(
