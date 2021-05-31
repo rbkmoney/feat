@@ -6,18 +6,14 @@
 -type request_value() :: integer() | float() | binary() | request() | [request()] | undefined.
 -type request() :: #{request_key() := request_value()}.
 
--type feature_name() :: integer().
+-type feature_name() :: non_neg_integer().
 -type feature_value() :: integer() | features() | [feature_value()] | undefined.
 -type features() :: #{feature_name() := feature_value()}.
 -type accessor() :: request_key() | nonempty_list(request_key()).
--type request_schema() :: schema() | {set, schema()}.
+-type nested_schema() :: schema() | {set, schema()}.
 -type schema() ::
     #{
-        feature_name() := accessor() | {accessor(), request_schema()} | 'reserved'
-    }
-    | #{
-        ?discriminator := accessor(),
-        feature_name() := schema()
+        ?discriminator | feature_name() := accessor() | {accessor(), nested_schema()} | schema()
     }.
 -type difference() :: ?difference | #{feature_name() := difference()}.
 
@@ -76,27 +72,14 @@ read_({set, Schema}, RequestList, Handler) when is_map(Schema) and is_list(Reque
         [],
         ListSorted
     );
-read_(UnionSchema = #{?discriminator := DiscriminatorAccessor}, Request, Handler) ->
-    DiscriminatorValue =
-        read_hashed_request_value(
-            DiscriminatorAccessor,
-            Request,
-            Handler
-        ),
-
-    maps:fold(
-        fun(Name, Schema, Acc) ->
-            VariantValue = read_(Schema, Request, Handler),
-            Acc#{Name => VariantValue}
-        end,
-        #{?discriminator => DiscriminatorValue},
-        maps:remove(?discriminator, UnionSchema)
-    );
 read_(Schema, Request, Handler) when is_map(Schema) ->
     maps:fold(
         fun
             (_Name, 'reserved', Acc) ->
                 Acc;
+            (Name, NestedSchema, Acc) when is_map(NestedSchema) ->
+                Value = read_(NestedSchema, Request, Handler),
+                Acc#{Name => Value};
             (Name, {Accessor, NestedSchema}, Acc) ->
                 NestedRequest = read_raw_request_value(Accessor, Request, Handler),
                 Value = read_(NestedSchema, NestedRequest, Handler),

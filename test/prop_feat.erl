@@ -21,6 +21,7 @@ prop_hash_calculatable() ->
     ?FORALL(Term, term(), is_integer(feat:hash(Term))).
 
 %% TODO:
+%% 0. switch to enhanced schema def (see history of schema() type)
 %% 1. prop_compare_scrambled_sets
 %% 2. prop_compare_different_sets (change, delete, add)
 %% 3. Invalid schema (e.g. #{0 => [<<"0">>],1 => [<<"0">>]})
