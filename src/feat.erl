@@ -307,14 +307,13 @@ accumulate(_, _, ?difference) ->
 %% ?difference marks that it's pointless to iterate further
 accumulate(?discriminator, ?difference, _) ->
     ?difference;
-accumulate(Key, ?difference, {DiffAcc, -1}) ->
-    {DiffAcc#{Key => ?difference}, -1};
 accumulate(Key, ?difference, {DiffAcc, SimpleCount}) ->
     {DiffAcc#{Key => ?difference}, SimpleCount + 1};
 %% At least one value is the same: should show it in the result with level of detalization
-%% -1 is magic value-marker for this
-accumulate(_, EmptyDiff, {DiffAcc, _}) when map_size(EmptyDiff) == 0 ->
-    {DiffAcc, -1};
+%% By decrementing SimpleCount we ensure that acc_to_diff works correctly for this case (see below) by making
+%% map_size(DiffAcc) and SimpleCount effectively diverge
+accumulate(_, EmptyDiff, {DiffAcc, SimpleCount}) when map_size(EmptyDiff) == 0 ->
+    {DiffAcc, SimpleCount - 1};
 accumulate(Key, Diff, {DiffAcc, SimpleCount}) ->
     {DiffAcc#{Key => Diff}, SimpleCount}.
 
