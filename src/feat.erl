@@ -307,6 +307,8 @@ accumulate(_, _, ?difference) ->
 %% ?difference marks that it's pointless to iterate further
 accumulate(?discriminator, ?difference, _) ->
     ?difference;
+accumulate(Key, ?difference, {DiffAcc, -1}) ->
+    {DiffAcc#{Key => ?difference}, -1};
 accumulate(Key, ?difference, {DiffAcc, SimpleCount}) ->
     {DiffAcc#{Key => ?difference}, SimpleCount + 1};
 %% At least one value is the same: should show it in the result with level of detalization
@@ -318,8 +320,6 @@ accumulate(Key, Diff, {DiffAcc, SimpleCount}) ->
 
 acc_to_diff(?difference) ->
     ?difference;
-acc_to_diff({DiffWithSameFields, -1}) ->
-    DiffWithSameFields;
 %% No nested diffs were added: technically, data is the same. Possible cases:
 %% 1. Nested schema is empty (w/o features)
 %% 2. It's a set schema with empty data in both requests
@@ -327,6 +327,9 @@ acc_to_diff({EmptyDiff, 0}) when map_size(EmptyDiff) == 0 ->
     #{};
 acc_to_diff({SimpleDiff, SimpleCount}) when map_size(SimpleDiff) == SimpleCount ->
     ?difference;
+%% Cases:
+%% 1. Contains at least 1 complex diff
+%% 2. At least 1 field is the same between two featuresets
 acc_to_diff({Diff, _}) ->
     Diff.
 
