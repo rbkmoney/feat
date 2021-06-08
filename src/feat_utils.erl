@@ -3,8 +3,12 @@
 -include("feat.hrl").
 
 -export([
+    zipfold/4,
     traverse_schema/3
 ]).
+
+-type zipfold_fun(A, K, V1, V2) ::
+    fun((K, V1, V2, A) -> A).
 
 -type traverse_node() ::
     value
@@ -19,6 +23,30 @@
 %%====================================================================
 %% API functions
 %%====================================================================
+
+-spec zipfold(
+    zipfold_fun(A, K, V1, V2),
+    InitAcc :: A,
+    #{K => V1},
+    #{K => V2}
+) -> A when
+    A :: term,
+    K :: term,
+    V1 :: term,
+    V2 :: term.
+zipfold(Fun, Acc, M1, M2) ->
+    maps:fold(
+        fun(Key, V1, AccIn) ->
+            case maps:find(Key, M2) of
+                {ok, V2} ->
+                    Fun(Key, V1, V2, AccIn);
+                error ->
+                    AccIn
+            end
+        end,
+        Acc,
+        M1
+    ).
 
 -spec traverse_schema(traversal_fun(T), InitAcc :: T, feat:schema()) -> T when T :: term().
 traverse_schema(Fun, Acc, Schema) ->
