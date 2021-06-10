@@ -346,17 +346,19 @@ list_diff_fields_inner_(Diff, Schema, Acc) when is_map(Schema) ->
 list_diff_fields_inner_({_, ?difference}, UnionSchema, {PathsAcc, PathRev}) when element(1, UnionSchema) == union ->
     Path = lists:reverse(PathRev),
     {[Path | PathsAcc], PathRev};
-list_diff_fields_inner_({Variant, Diff}, UnionSchema, Acc) when element(1, UnionSchema) == union ->
+list_diff_fields_inner_({Variant, Diff}, UnionSchema, Acc = {_PathsAcc, PathRev}) when
+    element(1, UnionSchema) == union
+->
     {_, CommonSchema, Variants} = destructure_union_schema(UnionSchema),
 
-    {value, {_, {_, VariantSchema}}} =
+    {value, {DisValue, {_, VariantSchema}}} =
         lists:search(
             fun({_DisValue, {FeatureName, _Schema}}) -> FeatureName =:= Variant end,
             maps:to_list(Variants)
         ),
 
-    Acc0 = list_diff_fields_simple_(Diff, CommonSchema, Acc),
-    list_diff_fields_inner_(Diff, VariantSchema, Acc0).
+    {PathsAcc, _PathRev} = list_diff_fields_simple_(Diff, CommonSchema, Acc),
+    list_diff_fields_inner_(Diff, VariantSchema, {PathsAcc, [DisValue | PathRev]}).
 
 list_diff_fields_simple_(Diff, Schema, Acc) ->
     feat_utils:zipfold(
@@ -558,7 +560,7 @@ simple_featurefull_schema_compare_test() ->
 -spec simple_featurefull_schema_list_diff_fields_test() -> _.
 simple_featurefull_schema_list_diff_fields_test() ->
     ?assertEqual(
-        [<<"1.0">>, <<"1.1">>, <<"1.2">>, <<"1.3.31.0">>, <<"1.4.41.412">>],
+        [<<"1.0">>, <<"1.1">>, <<"1.2">>, <<"1.3.b.31.0">>, <<"1.4.c.41.412">>],
         begin
             Features = read(?SCHEMA, ?REQUEST),
             OtherFeatures = read(?SCHEMA, ?OTHER_REQUEST),
