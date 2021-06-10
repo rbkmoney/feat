@@ -43,6 +43,7 @@
 
 -type event() ::
     {invalid_union_variant, Variant :: request_value(), request(), union_schema()}
+    | {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}
     | {invalid_schema, term()}
     | {invalid_schema_fragment, feature_name(), request()}
     | {request_visited, {request, request()}}
@@ -89,7 +90,7 @@ read_(SeqSchema, RequestList, Handler) when is_list(RequestList) ->
 read_(InnerSchema, Request, Handler) ->
     read_inner_(InnerSchema, Request, Handler).
 
-read_seq_({set, Schema}, RequestList, Handler) when is_list(RequestList) ->
+read_seq_({set, Schema}, RequestList, Handler) ->
     {_, ListIndex} = lists:foldl(fun(Item, {N, Acc}) -> {N + 1, [{N, Item} | Acc]} end, {0, []}, RequestList),
 
     ListSorted = lists:keysort(2, ListIndex),
@@ -116,7 +117,9 @@ read_inner_(UnionSchema, Request, Handler) when element(1, UnionSchema) == union
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
             VariantData = read_inner_(InnerSchema, Request, Handler),
             CommonData = read_simple_(CommonSchema, Request, Handler),
-            {Feature, maps:merge(CommonData, VariantData)}
+            {Feature, maps:merge(CommonData, VariantData)};
+        {ok, Data} ->
+            handle_event(Handler, {invalid_union_variant_schema, VariantName, Data, UnionSchema})
     end;
 read_inner_(Schema, Request, Handler) ->
     read_simple_(Schema, Request, Handler).
@@ -139,7 +142,11 @@ read_simple_(Schema, Request, Handler) when is_map(Schema) ->
         end,
         #{},
         Schema
-    ).
+    );
+%% Finally falling from `read` to here: schema is invalid
+read_simple_(Schema, _Request, Handler) ->
+    handle_event(Handler, {invalid_schema, Schema}),
+    undefined.
 
 read_raw_request_value(Accessor, Request, Handler) ->
     case read_request_value(Accessor, Request, Handler) of
@@ -176,6 +183,9 @@ read_request_value_(Key, Request, Handler) ->
 
 handle_event(undefined, {invalid_union_variant, VariantName, Request, Schema}) ->
     logger:warning("Invalid union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
+    undefined;
+handle_event(undefined, {invalid_union_variant_schema, VariantName, Data, Schema}) ->
+    logger:warning("Invalid schema for union variant ~p: ~p. Complete union schema: ~p", [VariantName, Data, Schema]),
     undefined;
 handle_event(undefined, {invalid_schema, Schema}) ->
     logger:warning("Invalid schema definition: ~p", [Schema]),
