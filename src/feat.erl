@@ -212,14 +212,12 @@ compare(Features, FeaturesWith) ->
             true
     end.
 
-%% Unions
 compare_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
     compare_simple_features(Fs, FsWith);
 compare_features(Fs, FsWith) when is_list(Fs), is_list(FsWith) ->
     compare_list_features(Fs, FsWith);
 compare_features(Fs, FsWith) when tuple_size(Fs) == 2, tuple_size(FsWith) == 2 ->
     compare_union_features(Fs, FsWith);
-%% Sets
 %% We expect that clients may _at any time_ change their implementation and start
 %% sending information they were not sending beforehand, so this is not considered a
 %% conflict.
