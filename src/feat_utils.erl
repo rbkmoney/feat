@@ -7,9 +7,6 @@
     traverse_schema/3
 ]).
 
--type zipfold_fun(A, K, V1, V2) ::
-    fun((K, V1, V2, A) -> A).
-
 -type traverse_node() ::
     value
     | {set, feat:schema()}
@@ -25,7 +22,7 @@
 %%====================================================================
 
 -spec zipfold(
-    zipfold_fun(A, K, V1, V2),
+    fun((K, V1, V2, A) -> A),
     InitAcc :: A,
     #{K => V1},
     #{K => V2}
