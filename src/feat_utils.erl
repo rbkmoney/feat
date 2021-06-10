@@ -29,11 +29,7 @@
     InitAcc :: A,
     #{K => V1},
     #{K => V2}
-) -> A when
-    A :: term,
-    K :: term,
-    V1 :: term,
-    V2 :: term.
+) -> A.
 zipfold(Fun, Acc, M1, M2) ->
     maps:fold(
         fun(Key, V1, AccIn) ->
@@ -48,7 +44,7 @@ zipfold(Fun, Acc, M1, M2) ->
         M1
     ).
 
--spec traverse_schema(traversal_fun(T), InitAcc :: T, feat:schema()) -> T when T :: term().
+-spec traverse_schema(traversal_fun(T), InitAcc :: T, feat:schema()) -> T.
 traverse_schema(Fun, Acc, Schema) ->
     do_traverse_schema(Fun, Acc, Schema, []).
 
