@@ -1,6 +1,6 @@
 # snakeoil
 
-A service that does something
+A service that does nothing
 
 ## Сборка
 
