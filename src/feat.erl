@@ -8,7 +8,7 @@
 
 -type accessor() :: request_key() | nonempty_list(request_key()).
 
--type simple_schema() :: #{feature_name() := accessor() | {accessor(), schema()}}.
+-type simple_schema() :: #{feature_name() := accessor() | {accessor(), schema()} | inner_schema()}.
 -type seq_schema() :: set_schema().
 -type set_schema() :: {set, inner_schema()}.
 -type union_variants() :: #{request_value() => {feature_name(), inner_schema()}}.
