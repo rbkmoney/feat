@@ -12,9 +12,7 @@
 -type seq_schema() :: set_schema().
 -type set_schema() :: {set, inner_schema()}.
 -type union_variants() :: #{request_value() => {feature_name(), inner_schema()}}.
--type union_schema() ::
-    {union, accessor(), union_variants()}
-    | {union, accessor(), CommonValues :: simple_schema(), union_variants()}.
+-type union_schema() :: {union, accessor(), union_variants()}.
 
 -type inner_schema() ::
     simple_schema() | union_schema().
@@ -29,7 +27,7 @@
 -type feature_value() :: field_feature() | features().
 -type simple_features() :: #{feature_name() := feature_value()}.
 -type seq_features() :: set_features().
--type set_features() :: [feature_value()].
+-type set_features() :: [{Index :: integer(), feature_value()}].
 -type union_features() :: {feature_name(), simple_features()}.
 -type features() :: simple_features() | seq_features() | union_features().
 
@@ -74,6 +72,8 @@
 
 -callback handle_event(event(), options()) -> ok.
 
+%% TODO: Read idea: why not ignore undefined fields all-together? better storage capacity
+
 -spec read(schema(), request()) -> features().
 read(Schema, Request) ->
     read(get_event_handler(), Schema, Request).
@@ -99,7 +99,7 @@ read_seq_({set, Schema}, RequestList, Handler) ->
             handle_event(Handler, {request_key_index_visit, Index}),
             Value = read_(Schema, Req, Handler),
             handle_event(Handler, {request_key_index_visited, Index}),
-            [[Index, Value] | Acc]
+            [{Index, Value} | Acc]
         end,
         [],
         ListSorted
@@ -129,20 +129,17 @@ read_simple_(Schema, Request, Handler) when is_map(Schema) ->
         fun
             (_Name, 'reserved', Acc) ->
                 Acc;
-            (Name, NestedSchema, Acc) when is_map(NestedSchema) ->
-                Value = read_(NestedSchema, Request, Handler),
-                Acc#{Name => Value};
-            (Name, {Accessor, NestedSchema}, Acc) ->
-                NestedRequest = read_raw_request_value(Accessor, Request, Handler),
-                Value = read_(NestedSchema, NestedRequest, Handler),
-                Acc#{Name => Value};
-            (Name, Accessor, Acc) ->
-                FeatureValue = read_hashed_request_value(Accessor, Request, Handler),
-                Acc#{Name => FeatureValue}
+            (Name, NestedSchema, Acc) ->
+                Acc#{Name => read_(NestedSchema, Request, Handler)}
         end,
         #{},
         Schema
     );
+read_simple_({Accessor, NestedSchema}, Request, Handler) ->
+    NestedRequest = read_raw_request_value(Accessor, Request, Handler),
+    read_(NestedSchema, NestedRequest, Handler);
+read_simple_(Accessor, Request, Handler) when is_binary(Accessor) ->
+    read_hashed_request_value(Accessor, Request, Handler);
 %% Finally falling from `read` to here: schema is invalid
 read_simple_(Schema, _Request, Handler) ->
     handle_event(Handler, {invalid_schema, Schema}),
@@ -252,7 +249,7 @@ compare_list_features(L1, L2) ->
 
 compare_list_features_([], [], Acc) ->
     acc_to_diff(Acc);
-compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
+compare_list_features_([{Index, V1} | Values], [{_, V2} | ValuesWith], Acc) ->
     Diff = compare_features(V1, V2),
     compare_list_features_(Values, ValuesWith, accumulate(Index, Diff, Acc)).
 
@@ -318,15 +315,14 @@ list_diff_fields(Schema, Diff) ->
         ConvertedDiff
     ).
 
+list_diff_fields_(?difference, Schema, {PathsAcc, PathRev}) ->
+    Path = lists:reverse(PathRev) ++ get_path(Schema),
+    {[Path | PathsAcc], PathRev};
 list_diff_fields_(Diffs, {set, Schema}, Acc) ->
     maps:fold(
-        fun
-            (I, ?difference, {PathsAcc, PathRev}) ->
-                Path = lists:reverse([I | PathRev]),
-                {[Path | PathsAcc], PathRev};
-            (I, Diff, {PathsAcc, PathRev}) ->
-                {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
-                {NewPathsAcc, PathRev}
+        fun(I, Diff, {PathsAcc, PathRev}) ->
+            {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
+            {NewPathsAcc, PathRev}
         end,
         Acc,
         Diffs
@@ -360,15 +356,11 @@ list_diff_fields_inner_({Variant, Diff}, UnionSchema, Acc = {_PathsAcc, PathRev}
     {PathsAcc, _PathRev} = list_diff_fields_simple_(Diff, CommonSchema, Acc),
     list_diff_fields_inner_(Diff, VariantSchema, {PathsAcc, [DisValue | PathRev]}).
 
-list_diff_fields_simple_(Diff, Schema, Acc) ->
+list_diff_fields_simple_(Diff, Schema, Acc) when is_map(Diff), is_map(Schema) ->
     feat_utils:zipfold(
-        fun
-            (_Feature, ?difference, SchemaPart, {PathsAcc, PathRev}) ->
-                Path = lists:reverse(PathRev) ++ get_path(SchemaPart),
-                {[Path | PathsAcc], PathRev};
-            (_Feature, DiffPart, SchemaPart, {_PathsAcc, PathRev} = AccIn) ->
-                {NewPathsAcc, _NewPathRev} = list_diff_fields_(DiffPart, SchemaPart, AccIn),
-                {NewPathsAcc, PathRev}
+        fun(_Feature, DiffPart, SchemaPart, {_PathsAcc, PathRev} = AccIn) ->
+            {NewPathsAcc, _NewPathRev} = list_diff_fields_(DiffPart, SchemaPart, AccIn),
+            {NewPathsAcc, PathRev}
         end,
         Acc,
         Diff,
@@ -383,8 +375,10 @@ destructure_union_schema(UnionSchema) ->
 
 get_path({Accessor, _Schema}) ->
     accessor_to_path(Accessor);
-get_path(Accessor) ->
-    accessor_to_path(Accessor).
+get_path(Accessor) when is_list(Accessor); is_binary(Accessor) ->
+    accessor_to_path(Accessor);
+get_path(_) ->
+    [].
 
 accessor_to_path(Key) when is_binary(Key) ->
     [Key];
