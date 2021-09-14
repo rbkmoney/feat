@@ -41,7 +41,6 @@
 
 -type event() ::
     {invalid_union_variant, Variant :: request_value(), request(), union_schema()}
-    | {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}
     | {invalid_schema, term()}
     | {invalid_schema_fragment, feature_name(), request()}
     | {request_visited, {request, request()}}
@@ -49,6 +48,11 @@
     | {request_key_index_visited, integer()}
     | {request_key_visit, {key, integer(), request()}}
     | {request_key_visited, {key, integer()}}.
+
+-type no_return(_T) :: no_return().
+
+-type error() ::
+    {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}.
 
 -type event_handler() :: {module(), options()} | undefined.
 -type options() :: term().
@@ -74,7 +78,7 @@
 
 %% TODO: Read idea: why not ignore undefined fields all-together? better storage capacity
 
--spec read(schema(), request()) -> features().
+-spec read(schema(), request()) -> features() | no_return(error()).
 read(Schema, Request) ->
     read(get_event_handler(), Schema, Request).
 
@@ -119,7 +123,7 @@ read_inner_(UnionSchema, Request, Handler) when element(1, UnionSchema) == union
             CommonData = read_simple_(CommonSchema, Request, Handler),
             {Feature, maps:merge(CommonData, VariantData)};
         {ok, Data} ->
-            handle_event(Handler, {invalid_union_variant_schema, VariantName, Data, UnionSchema})
+            error({invalid_union_variant_schema, VariantName, Data, UnionSchema})
     end;
 read_inner_(Schema, Request, Handler) ->
     read_simple_(Schema, Request, Handler).
@@ -180,9 +184,6 @@ read_request_value_(Key, Request, Handler) ->
 
 handle_event(undefined, {invalid_union_variant, VariantName, Request, Schema}) ->
     logger:warning("Invalid union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
-    undefined;
-handle_event(undefined, {invalid_union_variant_schema, VariantName, Data, Schema}) ->
-    logger:warning("Invalid schema for union variant ~p: ~p. Complete union schema: ~p", [VariantName, Data, Schema]),
     undefined;
 handle_event(undefined, {invalid_schema, Schema}) ->
     logger:warning("Invalid schema definition: ~p", [Schema]),
