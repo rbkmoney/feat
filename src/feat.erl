@@ -351,10 +351,10 @@ list_diff_fields_inner_({Variant, Diff}, UnionSchema, Acc = {_PathsAcc, PathRev}
 ->
     {_, CommonSchema, Variants} = destructure_union_schema(UnionSchema),
 
-    {value, {DisValue, {_, VariantSchema}}} =
-        lists:search(
-            fun({_DisValue, {FeatureName, _Schema}}) -> FeatureName =:= Variant end,
-            maps:to_list(Variants)
+    {DisValue, {_, VariantSchema}} =
+        genlib_map:search(
+            fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
+            Variants
         ),
 
     {PathsAcc, _PathRev} = list_diff_fields_simple_(Diff, CommonSchema, Acc),
