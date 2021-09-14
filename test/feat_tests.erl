@@ -4,21 +4,21 @@
 
 -include("feat.hrl").
 
--define(common_values, 1000).
--define(common_value, 1111).
--define(common_value_2, 1112).
--define(union, 2000).
+-define(COMMON_VALUES, 1000).
+-define(COMMON_VALUE, 1111).
+-define(COMMON_VALUE_2, 1112).
+-define(UNION, 2000).
 
 %% Serves as an example of the syntax
 -define(SCHEMA, #{
     1 =>
         {<<"1">>,
             {set, #{
-                ?common_values => #{
-                    ?common_value => <<"common_value">>,
-                    ?common_value_2 => <<"common_value_2">>
+                ?COMMON_VALUES => #{
+                    ?COMMON_VALUE => <<"common_value">>,
+                    ?COMMON_VALUE_2 => <<"common_value_2">>
                 },
-                ?union =>
+                ?UNION =>
                     {union, [<<"meta">>, <<"type">>], #{
                         <<"a">> =>
                             {2, #{
@@ -146,39 +146,39 @@ simple_featurefull_schema_read_test() ->
                 {
                     0,
                     #{
-                        ?common_values => #{
-                            ?common_value => feat:hash(<<"common">>),
-                            ?common_value_2 => feat:hash(<<"common_2">>)
+                        ?COMMON_VALUES => #{
+                            ?COMMON_VALUE => feat:hash(<<"common">>),
+                            ?COMMON_VALUE_2 => feat:hash(<<"common_2">>)
                         },
-                        ?union => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
                     }
                 },
                 {
                     1,
                     #{
-                        ?common_values => #{?common_value => feat:hash(<<"common">>), ?common_value_2 => undefined},
-                        ?union => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?COMMON_VALUES => #{?COMMON_VALUE => feat:hash(<<"common">>), ?COMMON_VALUE_2 => undefined},
+                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
                     }
                 },
                 {
                     2,
                     #{
-                        ?common_values => #{?common_value => undefined, ?common_value_2 => undefined},
-                        ?union => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
+                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
                     }
                 },
                 {
                     4,
                     #{
-                        ?common_values => #{?common_value => undefined, ?common_value_2 => undefined},
-                        ?union => {5, #{41 => #{411 => [], 412 => feat:hash(<<"c_412">>)}}}
+                        ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
+                        ?UNION => {5, #{41 => #{411 => [], 412 => feat:hash(<<"c_412">>)}}}
                     }
                 },
                 {
                     3,
                     #{
-                        ?common_values => #{?common_value => undefined, ?common_value_2 => undefined},
-                        ?union =>
+                        ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
+                        ?UNION =>
                             {4, #{
                                 31 => [
                                     {1, #{311 => feat:hash(<<"b_311_2">>)}},
@@ -190,8 +190,8 @@ simple_featurefull_schema_read_test() ->
                 {
                     5,
                     #{
-                        ?common_values => #{?common_value => undefined, ?common_value_2 => undefined},
-                        ?union => {42, #{}}
+                        ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
+                        ?UNION => {42, #{}}
                     }
                 }
             ]
@@ -204,11 +204,11 @@ simple_featurefull_schema_compare_test() ->
     ?assertEqual(
         {false, #{
             1 => #{
-                0 => #{?union => {2, ?difference}, ?common_values => #{?common_value_2 => ?difference}},
-                1 => #{?union => {2, ?difference}},
-                2 => #{?union => ?difference},
-                3 => #{?union => {4, #{31 => #{0 => ?difference}}}},
-                4 => #{?union => {5, #{41 => #{412 => ?difference}}}}
+                0 => #{?UNION => {2, ?difference}, ?COMMON_VALUES => #{?COMMON_VALUE_2 => ?difference}},
+                1 => #{?UNION => {2, ?difference}},
+                2 => #{?UNION => ?difference},
+                3 => #{?UNION => {4, #{31 => #{0 => ?difference}}}},
+                4 => #{?UNION => {5, #{41 => #{412 => ?difference}}}}
             }
         }},
         begin
@@ -227,7 +227,8 @@ simple_featurefull_schema_list_diff_fields_test() ->
         %% The first element differs in one of common values, yet the union part is differs completely,
         %% and because there was no accessor on the way, <<"1.0">> is correct, but misleading:
         %% we have both <<"1.0">> and <<"1.0.common_value_2">>
-        %% The only way to differentiate union values is to encode them directly to field paths (e.g. <<"1.0.a">> in this case)
+        %% The only way to differentiate union values is to encode them directly to field paths
+        %% (e.g. <<"1.0.a">> in this case)
         [
             <<"1.0.common_value_2">>,
             <<"1.0">>,
