@@ -109,19 +109,14 @@ read_seq_({set, Schema}, RequestList, Handler) ->
         ListSorted
     ).
 
-read_inner_(UnionSchema, Request, Handler) when element(1, UnionSchema) == union ->
-    {Accessor, CommonSchema, Variants} =
-        destructure_union_schema(UnionSchema),
-
+read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
     VariantName = read_raw_request_value(Accessor, Request, Handler),
     case maps:find(VariantName, Variants) of
         error ->
             handle_event(Handler, {invalid_union_variant, VariantName, Request, UnionSchema}),
             undefined;
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
-            VariantData = read_inner_(InnerSchema, Request, Handler),
-            CommonData = read_simple_(CommonSchema, Request, Handler),
-            {Feature, maps:merge(CommonData, VariantData)};
+            {Feature, read_inner_(InnerSchema, Request, Handler)};
         {ok, Data} ->
             error({invalid_union_variant_schema, VariantName, Data, UnionSchema})
     end;
@@ -337,18 +332,13 @@ list_diff_fields_inner_(Diff, Schema, Acc) when is_map(Schema) ->
 list_diff_fields_inner_({_, ?difference}, UnionSchema, {PathsAcc, PathRev}) when element(1, UnionSchema) == union ->
     Path = lists:reverse(PathRev),
     {[Path | PathsAcc], PathRev};
-list_diff_fields_inner_({Variant, Diff}, UnionSchema, Acc = {_PathsAcc, PathRev}) when
-    element(1, UnionSchema) == union
-->
-    {_, CommonSchema, Variants} = destructure_union_schema(UnionSchema),
-
+list_diff_fields_inner_({Variant, Diff}, {union, _Accessor, Variants}, {PathsAcc, PathRev}) ->
     {DisValue, {_, VariantSchema}} =
         genlib_map:search(
             fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
             Variants
         ),
 
-    {PathsAcc, _PathRev} = list_diff_fields_simple_(Diff, CommonSchema, Acc),
     list_diff_fields_inner_(Diff, VariantSchema, {PathsAcc, [DisValue | PathRev]}).
 
 list_diff_fields_simple_(Diff, Schema, Acc) when is_map(Diff), is_map(Schema) ->
@@ -361,12 +351,6 @@ list_diff_fields_simple_(Diff, Schema, Acc) when is_map(Diff), is_map(Schema) ->
         Diff,
         Schema
     ).
-
-destructure_union_schema(UnionSchema) ->
-    case UnionSchema of
-        {union, A, V} -> {A, #{}, V};
-        {union, A, C, V} -> {A, C, V}
-    end.
 
 get_path({Accessor, _Schema}) ->
     accessor_to_path(Accessor);
