@@ -182,9 +182,6 @@ read_request_value_(Key, Request, Handler) ->
 handle_event(undefined, {invalid_union_variant, VariantName, Request, Schema}) ->
     logger:warning("Invalid union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
     undefined;
-handle_event(undefined, {invalid_schema, Schema}) ->
-    logger:warning("Invalid schema definition: ~p", [Schema]),
-    undefined;
 handle_event(undefined, {invalid_schema_fragment, Key, Request}) ->
     logger:warning("Unable to extract idemp feature with schema: ~p from client request subset: ~p", [Key, Request]),
     undefined;
