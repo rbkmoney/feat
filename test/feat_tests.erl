@@ -144,57 +144,59 @@ simple_featurefull_schema_read_test() ->
     ?assertEqual(
         #{
             1 => [
-                {
+                [
                     0,
                     #{
                         ?COMMON_VALUES => #{
                             ?COMMON_VALUE => feat:hash(<<"common">>),
                             ?COMMON_VALUE_2 => feat:hash(<<"common_2">>)
                         },
-                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?UNION => [2, #{21 => feat:hash(<<"a_21">>)}]
                     }
-                },
-                {
+                ],
+                [
                     1,
                     #{
                         ?COMMON_VALUES => #{?COMMON_VALUE => feat:hash(<<"common">>), ?COMMON_VALUE_2 => undefined},
-                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?UNION => [2, #{21 => feat:hash(<<"a_21">>)}]
                     }
-                },
-                {
+                ],
+                [
                     2,
                     #{
                         ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
-                        ?UNION => {2, #{21 => feat:hash(<<"a_21">>)}}
+                        ?UNION => [2, #{21 => feat:hash(<<"a_21">>)}]
                     }
-                },
-                {
+                ],
+                [
                     4,
                     #{
                         ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
-                        ?UNION => {5, #{41 => #{411 => [], 412 => feat:hash(<<"c_412">>)}}}
+                        ?UNION => [5, #{41 => #{411 => [], 412 => feat:hash(<<"c_412">>)}}]
                     }
-                },
-                {
+                ],
+                [
                     3,
                     #{
                         ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
-                        ?UNION =>
-                            {4, #{
+                        ?UNION => [
+                            4,
+                            #{
                                 31 => [
-                                    {1, #{311 => feat:hash(<<"b_311_2">>)}},
-                                    {0, #{311 => feat:hash(<<"b_311_1">>)}}
+                                    [1, #{311 => feat:hash(<<"b_311_2">>)}],
+                                    [0, #{311 => feat:hash(<<"b_311_1">>)}]
                                 ]
-                            }}
+                            }
+                        ]
                     }
-                },
-                {
+                ],
+                [
                     5,
                     #{
                         ?COMMON_VALUES => #{?COMMON_VALUE => undefined, ?COMMON_VALUE_2 => undefined},
-                        ?UNION => {42, #{}}
+                        ?UNION => [42, #{}]
                     }
-                }
+                ]
             ]
         },
         feat:read(?SCHEMA, ?REQUEST)
@@ -205,11 +207,11 @@ simple_featurefull_schema_compare_test() ->
     ?assertEqual(
         {false, #{
             1 => #{
-                0 => #{?UNION => {2, ?difference}, ?COMMON_VALUES => #{?COMMON_VALUE_2 => ?difference}},
-                1 => #{?UNION => {2, ?difference}},
+                0 => #{?UNION => [2, ?difference], ?COMMON_VALUES => #{?COMMON_VALUE_2 => ?difference}},
+                1 => #{?UNION => [2, ?difference]},
                 2 => #{?UNION => ?difference},
-                3 => #{?UNION => {4, #{31 => #{0 => ?difference}}}},
-                4 => #{?UNION => {5, #{41 => #{412 => ?difference}}}}
+                3 => #{?UNION => [4, #{31 => #{0 => ?difference}}]},
+                4 => #{?UNION => [5, #{41 => #{412 => ?difference}}]}
             }
         }},
         begin

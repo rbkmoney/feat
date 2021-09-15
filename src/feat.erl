@@ -22,13 +22,23 @@
     | seq_schema()
     | union_schema().
 
+%% Special type that denotes a list with strict number and order of elements,
+%% just as tuples do, but is impossible to describe with Erlang typespecs
+%%
+%% The reason for storing values as lists opposing to tuples is for better serialization:
+%% although the tuple is a useful primitive, most formats support only arrays/lists
+%%
+%% So the goal here is to achieve effortless `cool_format:encode(Features)`
+%% as long as the format provides array and map primitives
+-type list_tuple(A, B) :: [A | B].
+
 -type feature_name() :: non_neg_integer().
 -type field_feature() :: integer() | undefined.
 -type feature_value() :: field_feature() | features().
 -type simple_features() :: #{feature_name() := feature_value()}.
 -type seq_features() :: set_features().
--type set_features() :: [{Index :: integer(), feature_value()}].
--type union_features() :: {feature_name(), simple_features()}.
+-type set_features() :: [list_tuple(Index :: integer(), feature_value())].
+-type union_features() :: list_tuple(feature_name(), simple_features()).
 -type features() :: simple_features() | seq_features() | union_features().
 
 -type total_difference() :: ?difference.
@@ -103,7 +113,7 @@ read_seq_({set, Schema}, RequestList, Handler) ->
             handle_event(Handler, {request_key_index_visit, Index}),
             Value = read_(Schema, Req, Handler),
             handle_event(Handler, {request_key_index_visited, Index}),
-            [{Index, Value} | Acc]
+            [[Index, Value] | Acc]
         end,
         [],
         ListSorted
@@ -116,7 +126,7 @@ read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
             handle_event(Handler, {missing_union_variant, VariantName, Request, UnionSchema}),
             undefined;
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
-            {Feature, read_inner_(InnerSchema, Request, Handler)};
+            [Feature, read_inner_(InnerSchema, Request, Handler)];
         {ok, InvalidVariantSchema} ->
             error({invalid_union_variant_schema, VariantName, InvalidVariantSchema, UnionSchema})
     end;
@@ -201,10 +211,11 @@ compare(Features, FeaturesWith) ->
 
 compare_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
     compare_simple_features(Fs, FsWith);
+%% NOTE: this seems very fragile, but if the contract for sets (list of lists) stands, this will do
+compare_features([VIndex1, _] = Fs, [VIndex2, _] = FsWith) when is_integer(VIndex1), is_integer(VIndex2) ->
+    compare_union_features(Fs, FsWith);
 compare_features(Fs, FsWith) when is_list(Fs), is_list(FsWith) ->
     compare_list_features(Fs, FsWith);
-compare_features(Fs, FsWith) when tuple_size(Fs) == 2, tuple_size(FsWith) == 2 ->
-    compare_union_features(Fs, FsWith);
 %% We expect that clients may _at any time_ change their implementation and start
 %% sending information they were not sending beforehand, so this is not considered a
 %% conflict.
@@ -239,19 +250,19 @@ compare_list_features(L1, L2) ->
 
 compare_list_features_([], [], Acc) ->
     acc_to_diff(Acc);
-compare_list_features_([{Index, V1} | Values], [{_, V2} | ValuesWith], Acc) ->
+compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
     Diff = compare_features(V1, V2),
     compare_list_features_(Values, ValuesWith, accumulate(Index, Diff, Acc)).
 
-compare_union_features({Variant, _}, {VariantWith, _}) when Variant /= VariantWith ->
+compare_union_features([Variant, _], [VariantWith, _]) when Variant /= VariantWith ->
     ?difference;
-compare_union_features({VariantFeature, Features}, {_, FeaturesWith}) when is_map(Features), is_map(FeaturesWith) ->
+compare_union_features([VariantFeature, Features], [_, FeaturesWith]) when is_map(Features), is_map(FeaturesWith) ->
     case compare_simple_features(Features, FeaturesWith) of
         %% forwarding no-change for correct minimization
         M when map_size(M) == 0 ->
             #{};
         Diff ->
-            {VariantFeature, Diff}
+            [VariantFeature, Diff]
     end.
 
 %% Acc values
@@ -329,10 +340,10 @@ list_diff_fields_inner_(Diff, Schema, Acc) when is_map(Schema) ->
 %% Union
 %% If discriminator is different, diff would've been minimized because of it:
 %% => implying, discriminator is not different here
-list_diff_fields_inner_({_, ?difference}, UnionSchema, {PathsAcc, PathRev}) when element(1, UnionSchema) == union ->
+list_diff_fields_inner_([_, ?difference], UnionSchema, {PathsAcc, PathRev}) when element(1, UnionSchema) == union ->
     Path = lists:reverse(PathRev),
     {[Path | PathsAcc], PathRev};
-list_diff_fields_inner_({Variant, Diff}, {union, _Accessor, Variants}, {PathsAcc, PathRev}) ->
+list_diff_fields_inner_([Variant, Diff], {union, _Accessor, Variants}, {PathsAcc, PathRev}) ->
     {DisValue, {_, VariantSchema}} =
         genlib_map:search(
             fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
