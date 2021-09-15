@@ -51,7 +51,8 @@
                                         412 => <<"412">>
                                     }}
                             }},
-                        <<"unchanged">> => {42, #{}}
+                        <<"unchanged">> => {42, #{}},
+                        <<"invalid">> => {invalid_spec}
                     }}
             }}}
 }).
@@ -244,4 +245,19 @@ simple_featurefull_schema_list_diff_fields_test() ->
             {false, Diff} = feat:compare(Features, OtherFeatures),
             feat:list_diff_fields(?SCHEMA, Diff)
         end
+    ).
+
+-spec fail_on_invalid_schema_test() -> _.
+fail_on_invalid_schema_test() ->
+    ?assertError(
+        {invalid_schema, {my, cool, schema}},
+        feat:read(#{42 => {my, cool, schema}}, #{<<"key">> => <<"value">>})
+    ).
+
+-spec fail_on_missing_variant_test() -> _.
+fail_on_missing_variant_test() ->
+    #{1 := {_, {set, #{?UNION := UnionSchema}}}} = ?SCHEMA,
+    ?assertError(
+        {invalid_union_variant_schema, <<"invalid">>, {invalid_spec}, UnionSchema},
+        feat:read(?SCHEMA, #{<<"1">> => [#{<<"meta">> => #{<<"type">> => <<"invalid">>}}]})
     ).

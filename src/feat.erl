@@ -41,7 +41,6 @@
 
 -type event() ::
     {invalid_union_variant, Variant :: request_value(), request(), union_schema()}
-    | {invalid_schema, term()}
     | {invalid_schema_fragment, feature_name(), request()}
     | {request_visited, {request, request()}}
     | {request_key_index_visit, integer()}
@@ -52,7 +51,8 @@
 -type no_return(_T) :: no_return().
 
 -type error() ::
-    {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}.
+    {invalid_schema, term()}
+    | {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}.
 
 -type event_handler() :: {module(), options()} | undefined.
 -type options() :: term().
@@ -145,9 +145,8 @@ read_simple_({Accessor, NestedSchema}, Request, Handler) ->
 read_simple_(Accessor, Request, Handler) when is_binary(Accessor) ->
     read_hashed_request_value(Accessor, Request, Handler);
 %% Finally falling from `read` to here: schema is invalid
-read_simple_(Schema, _Request, Handler) ->
-    handle_event(Handler, {invalid_schema, Schema}),
-    undefined.
+read_simple_(Schema, _Request, _Handler) ->
+    error({invalid_schema, Schema}).
 
 read_raw_request_value(Accessor, Request, Handler) ->
     case read_request_value(Accessor, Request, Handler) of
@@ -160,14 +159,14 @@ read_hashed_request_value(Accessor, Request, Handler) ->
         undefined -> undefined
     end.
 
-read_request_value(Accessor, Value, Handler) when is_binary(Accessor) ->
-    read_request_value_([Accessor], Value, Handler);
-read_request_value(Accessor, Value, Handler) when is_list(Accessor) ->
-    read_request_value_(Accessor, Value, Handler).
+read_request_value(Accessor, Value, Handler) ->
+    read_request_value_(accessor_to_path(Accessor), Value, Handler).
 
+read_request_value_(_, undefined, _) ->
+    undefined;
 read_request_value_([], Value, _) ->
     {ok, Value};
-read_request_value_([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
+read_request_value_([Key | Rest], Request, Handler) when is_binary(Key), is_map(Request) ->
     case maps:find(Key, Request) of
         {ok, SubRequest} ->
             handle_event(Handler, {request_key_visit, {key, Key, SubRequest}}),
@@ -177,8 +176,6 @@ read_request_value_([Key | Rest], Request = #{}, Handler) when is_binary(Key) ->
         error ->
             undefined
     end;
-read_request_value_(_, undefined, _) ->
-    undefined;
 read_request_value_(Key, Request, Handler) ->
     handle_event(Handler, {invalid_schema_fragment, Key, Request}).
 
