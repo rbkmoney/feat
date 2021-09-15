@@ -40,7 +40,7 @@
     | union_difference().
 
 -type event() ::
-    {invalid_union_variant, Variant :: request_value(), request(), union_schema()}
+    {missing_union_variant, Variant :: request_value(), request(), union_schema()}
     | {invalid_schema_fragment, feature_name(), request()}
     | {request_visited, {request, request()}}
     | {request_key_index_visit, integer()}
@@ -113,7 +113,7 @@ read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
     VariantName = read_raw_request_value(Accessor, Request, Handler),
     case maps:find(VariantName, Variants) of
         error ->
-            handle_event(Handler, {invalid_union_variant, VariantName, Request, UnionSchema}),
+            handle_event(Handler, {missing_union_variant, VariantName, Request, UnionSchema}),
             undefined;
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
             {Feature, read_inner_(InnerSchema, Request, Handler)};
@@ -174,8 +174,8 @@ read_request_value_([Key | Rest], Request, Handler) when is_binary(Key), is_map(
 read_request_value_(Key, Request, Handler) ->
     handle_event(Handler, {invalid_schema_fragment, Key, Request}).
 
-handle_event(undefined, {invalid_union_variant, VariantName, Request, Schema}) ->
-    logger:warning("Invalid union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
+handle_event(undefined, {missing_union_variant, VariantName, Request, Schema}) ->
+    logger:warning("Missing union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
     undefined;
 handle_event(undefined, {invalid_schema_fragment, Key, Request}) ->
     logger:warning("Unable to extract idemp feature with schema: ~p from client request subset: ~p", [Key, Request]),
