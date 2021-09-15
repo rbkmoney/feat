@@ -52,7 +52,7 @@
 
 -type error() ::
     {invalid_schema, term()}
-    | {invalid_union_variant_schema, Variant :: request_value(), Data :: term(), union_schema()}.
+    | {invalid_union_variant_schema, Variant :: request_value(), InvalidVariantSchema :: term(), union_schema()}.
 
 -type event_handler() :: {module(), options()} | undefined.
 -type options() :: term().
@@ -117,8 +117,8 @@ read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
             undefined;
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
             {Feature, read_inner_(InnerSchema, Request, Handler)};
-        {ok, Data} ->
-            error({invalid_union_variant_schema, VariantName, Data, UnionSchema})
+        {ok, InvalidVariantSchema} ->
+            error({invalid_union_variant_schema, VariantName, InvalidVariantSchema, UnionSchema})
     end;
 read_inner_(Schema, Request, Handler) ->
     read_simple_(Schema, Request, Handler).
