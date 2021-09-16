@@ -264,3 +264,72 @@ fail_on_missing_variant_test() ->
         {invalid_union_variant_schema, <<"invalid">>, {invalid_spec}, UnionSchema},
         feat:read(?SCHEMA, #{<<"1">> => [#{<<"meta">> => #{<<"type">> => <<"invalid">>}}]})
     ).
+
+-spec all_events_test() -> _.
+all_events_test() ->
+    Schema = #{
+        1 =>
+            {<<"key">>,
+                {set,
+                    {union, [<<"type">>], #{
+                        <<"variant">> => {2, #{3 => <<"field">>, 4 => [<<"nested">>, <<"field">>]}},
+                        <<"invalid">> => {2, <<"field">>}
+                    }}}}
+    },
+    #{1 := {<<"key">>, {set, UnionSchema}}} = Schema,
+    Request = #{
+        <<"key">> => [
+            #{<<"type">> => <<"variant">>, <<"field">> => <<"value">>},
+            #{<<"type">> => <<"variant">>, <<"nested">> => [<<"nope">>]},
+            #{<<"type">> => <<"missing">>}
+        ]
+    },
+    Elements = maps:get(<<"key">>, Request),
+    [Element0, Element1, Element2] = Elements,
+    Pid = self(),
+    Handler = fun(Event) ->
+        Pid ! Event,
+        ok
+    end,
+    feat:read(Handler, Schema, Request),
+
+    Expected = [
+        {request_visited, Request},
+
+        {request_key_visit, <<"key">>, Elements},
+        {request_key_visited, <<"key">>, Elements},
+
+        %% NOTE: Elements are out of order due to how set feature encoding is implemented
+        {request_index_visit, 2, Element2},
+        {request_key_visit, <<"type">>, <<"missing">>},
+        {request_key_visited, <<"type">>, <<"missing">>},
+        {missing_union_variant, <<"missing">>, Element2, UnionSchema},
+        {request_index_visited, 2, Element2},
+
+        {request_index_visit, 0, Element0},
+        {request_key_visit, <<"type">>, <<"variant">>},
+        {request_key_visited, <<"type">>, <<"variant">>},
+        {request_variant_visit, 2, <<"variant">>, Element0},
+        {request_key_visit, <<"field">>, <<"value">>},
+        {request_key_visited, <<"field">>, <<"value">>},
+        {request_variant_visited, 2, <<"variant">>, Element0},
+        {request_index_visited, 0, Element0},
+
+        {request_index_visit, 1, Element1},
+        {request_key_visit, <<"type">>, <<"variant">>},
+        {request_key_visited, <<"type">>, <<"variant">>},
+        {request_variant_visit, 2, <<"variant">>, Element1},
+        {request_key_visit, <<"nested">>, [<<"nope">>]},
+        {invalid_schema_fragment, [<<"field">>], [<<"nope">>]},
+        {request_key_visited, <<"nested">>, [<<"nope">>]},
+        {request_variant_visited, 2, <<"variant">>, Element1},
+        {request_index_visited, 1, Element1}
+    ],
+
+    ?assertEqual(Expected, receive_all()).
+
+receive_all() ->
+    receive
+        Msg -> [Msg | receive_all()]
+    after 0 -> []
+    end.
