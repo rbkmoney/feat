@@ -249,6 +249,7 @@ simple_featurefull_schema_list_diff_fields_test() ->
         end
     ).
 
+-dialyzer({nowarn_function, fail_on_invalid_schema_test/0}).
 -spec fail_on_invalid_schema_test() -> _.
 fail_on_invalid_schema_test() ->
     ?assertError(

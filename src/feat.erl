@@ -298,7 +298,7 @@ acc_to_diff({Diff, _}) ->
 list_diff_fields(_Schema, ?difference) ->
     all;
 list_diff_fields(Schema, Diff) ->
-    {ConvertedDiff, _} = list_diff_fields_(Diff, Schema, {[], []}),
+    PartedPaths = list_diff_fields_(Diff, Schema, [], []),
     lists:foldl(
         fun(Keys, AccIn) ->
             KeysBin = lists:map(fun genlib:to_binary/1, Keys),
@@ -311,52 +311,49 @@ list_diff_fields(Schema, Diff) ->
             end
         end,
         [],
-        ConvertedDiff
+        PartedPaths
     ).
 
-list_diff_fields_(?difference, Schema, {PathsAcc, PathRev}) ->
+list_diff_fields_(?difference, Schema, PathRev, Acc) ->
     Path = lists:reverse(PathRev) ++ get_path(Schema),
-    {[Path | PathsAcc], PathRev};
-list_diff_fields_(Diffs, {set, Schema}, Acc) ->
+    [Path | Acc];
+list_diff_fields_(Diffs, {set, Schema}, PathRev, InitAcc) ->
     maps:fold(
-        fun(I, Diff, {PathsAcc, PathRev}) ->
-            {NewPathsAcc, _NewPathRev} = list_diff_fields_(Diff, Schema, {PathsAcc, [I | PathRev]}),
-            {NewPathsAcc, PathRev}
+        fun(I, Diff, Acc) ->
+            list_diff_fields_(Diff, Schema, [I | PathRev], Acc)
         end,
-        Acc,
+        InitAcc,
         Diffs
     );
-list_diff_fields_(Diff, {Accessor, Schema}, {PathsAcc, PathRev}) ->
+list_diff_fields_(Diff, {Accessor, Schema}, PathRev, Acc) ->
     Path = accessor_to_path(Accessor),
-    list_diff_fields_(Diff, Schema, {PathsAcc, lists:reverse(Path) ++ PathRev});
-list_diff_fields_(Diff, Schema, Acc) ->
-    list_diff_fields_inner_(Diff, Schema, Acc).
+    list_diff_fields_(Diff, Schema, lists:reverse(Path) ++ PathRev, Acc);
+list_diff_fields_(Diff, Schema, PathRev, Acc) ->
+    list_diff_fields_inner_(Diff, Schema, PathRev, Acc).
 
 %% Simple
-list_diff_fields_inner_(Diff, Schema, Acc) when is_map(Schema) ->
-    list_diff_fields_simple_(Diff, Schema, Acc);
+list_diff_fields_inner_(Diff, Schema, PathRev, Acc) when is_map(Schema) ->
+    list_diff_fields_simple_(Diff, Schema, PathRev, Acc);
 %% Union
 %% If discriminator is different, diff would've been minimized because of it:
 %% => implying, discriminator is not different here
-list_diff_fields_inner_([_, ?difference], UnionSchema, {PathsAcc, PathRev}) when element(1, UnionSchema) == union ->
-    Path = lists:reverse(PathRev),
-    {[Path | PathsAcc], PathRev};
-list_diff_fields_inner_([Variant, Diff], {union, _Accessor, Variants}, {PathsAcc, PathRev}) ->
+list_diff_fields_inner_([_, ?difference], UnionSchema, PathRev, Acc) when element(1, UnionSchema) == union ->
+    [lists:reverse(PathRev) | Acc];
+list_diff_fields_inner_([Variant, Diff], {union, _Accessor, Variants}, PathRev, Acc) ->
     {DisValue, {_, VariantSchema}} =
         genlib_map:search(
             fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
             Variants
         ),
 
-    list_diff_fields_inner_(Diff, VariantSchema, {PathsAcc, [DisValue | PathRev]}).
+    list_diff_fields_inner_(Diff, VariantSchema, [DisValue | PathRev], Acc).
 
-list_diff_fields_simple_(Diff, Schema, Acc) when is_map(Diff), is_map(Schema) ->
+list_diff_fields_simple_(Diff, Schema, PathRev, AccInit) when is_map(Diff), is_map(Schema) ->
     feat_utils:zipfold(
-        fun(_Feature, DiffPart, SchemaPart, {_PathsAcc, PathRev} = AccIn) ->
-            {NewPathsAcc, _NewPathRev} = list_diff_fields_(DiffPart, SchemaPart, AccIn),
-            {NewPathsAcc, PathRev}
+        fun(_Feature, DiffPart, SchemaPart, Acc) ->
+            list_diff_fields_(DiffPart, SchemaPart, PathRev, Acc)
         end,
-        Acc,
+        AccInit,
         Diff,
         Schema
     ).

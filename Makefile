@@ -3,6 +3,8 @@ REBAR := $(shell which rebar3 2>/dev/null || which ./rebar3)
 .PHONY: get_deps ensure_elvis compile lint check_format \
     format test xref clean distclean dialyze plt_update
 
+all: test format lint xref dialyze
+
 get_deps:
 	$(REBAR) get-deps
 
