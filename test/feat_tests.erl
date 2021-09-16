@@ -291,7 +291,7 @@ all_events_test() ->
         Pid ! Event,
         ok
     end,
-    feat:read(Handler, Schema, Request),
+    _ = feat:read(Handler, Schema, Request),
 
     Expected = [
         {request_visited, Request},
