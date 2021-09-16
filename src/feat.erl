@@ -281,8 +281,6 @@ accumulate(_, EmptyDiff, {DiffAcc, SimpleCount}) when map_size(EmptyDiff) == 0 -
 accumulate(Key, Diff, {DiffAcc, SimpleCount}) ->
     {DiffAcc#{Key => Diff}, SimpleCount}.
 
-acc_to_diff(?difference) ->
-    ?difference;
 %% No nested diffs were added: technically, data is the same. Possible cases:
 %% 1. Nested schema is empty (w/o features)
 %% 2. It's a set schema with empty data in both requests
