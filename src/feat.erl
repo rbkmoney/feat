@@ -323,72 +323,99 @@ acc_to_diff({Diff, _}) ->
 list_diff_fields(_Schema, ?difference) ->
     all;
 list_diff_fields(Schema, Diff) ->
-    PartedPaths = list_diff_fields_(Diff, Schema, [], []),
-    lists:foldl(
-        fun(Keys, AccIn) ->
-            KeysBin = lists:map(fun genlib:to_binary/1, Keys),
-            Item = list_to_binary(lists:join(<<".">>, KeysBin)),
-            case lists:member(Item, AccIn) of
-                false ->
-                    [Item | AccIn];
-                _ ->
-                    AccIn
-            end
-        end,
-        [],
-        PartedPaths
+    lists:sort(
+        lists:map(
+            fun(Keys) -> list_to_binary(lists:join(<<".">>, Keys)) end,
+            unroll_pathmap(build_pathmap(Diff, Schema))
+        )
     ).
 
-list_diff_fields_(?difference, Schema, PathRev, Acc) ->
-    Path = lists:reverse(PathRev) ++ get_path(Schema),
-    [Path | Acc];
-list_diff_fields_(Diffs, {set, Schema}, PathRev, InitAcc) ->
+unroll_pathmap(Pathmap) ->
+    maps:fold(
+        fun
+            (Key, Empty, Acc) when map_size(Empty) =:= 0 ->
+                [[Key] | Acc];
+            (Key, Rest, Acc) ->
+                lists:map(
+                    fun(NestedPath) -> [Key | NestedPath] end,
+                    unroll_pathmap(Rest)
+                ) ++ Acc
+        end,
+        [],
+        Pathmap
+    ).
+
+build_pathmap(?difference, Accessor) when is_binary(Accessor); is_list(Accessor) ->
+    nested_map(accessor_to_path(Accessor), #{});
+build_pathmap(?difference, _Schema) ->
+    #{};
+build_pathmap(Diffs, {set, Schema}) ->
+    build_pathmap_set(Diffs, Schema);
+build_pathmap(Diff, {Accessor, Schema}) ->
+    build_pathmap_nested(Diff, Accessor, Schema);
+build_pathmap(Diff, Schema) when is_map(Schema) ->
+    build_pathmap_map(Diff, Schema);
+build_pathmap(Diff, {union, _Accessor, Variants}) ->
+    build_pathmap_union(Diff, Variants).
+
+build_pathmap_set(Diffs, Schema) ->
     maps:fold(
         fun(I, Diff, Acc) ->
-            list_diff_fields_(Diff, Schema, [I | PathRev], Acc)
+            Acc#{integer_to_binary(I) => build_pathmap(Diff, Schema)}
         end,
-        InitAcc,
+        #{},
         Diffs
-    );
-list_diff_fields_(Diff, {Accessor, Schema}, PathRev, Acc) ->
-    Path = accessor_to_path(Accessor),
-    list_diff_fields_(Diff, Schema, lists:reverse(Path) ++ PathRev, Acc);
-list_diff_fields_(Diff, Schema, PathRev, Acc) ->
-    list_diff_fields_inner_(Diff, Schema, PathRev, Acc).
+    ).
 
-%% Simple
-list_diff_fields_inner_(Diff, Schema, PathRev, Acc) when is_map(Schema) ->
-    list_diff_fields_simple_(Diff, Schema, PathRev, Acc);
-%% Union
+build_pathmap_nested(Diff, Accessor, Schema) ->
+    nested_map(accessor_to_path(Accessor), build_pathmap(Diff, Schema)).
+
 %% If discriminator is different, diff would've been minimized because of it:
 %% => implying, discriminator is not different here
-list_diff_fields_inner_([_, ?difference], UnionSchema, PathRev, Acc) when element(1, UnionSchema) == union ->
-    [lists:reverse(PathRev) | Acc];
-list_diff_fields_inner_([Variant, Diff], {union, _Accessor, Variants}, PathRev, Acc) ->
+build_pathmap_union([_, ?difference], _Variants) ->
+    #{};
+build_pathmap_union([Variant, Diff], Variants) ->
     {DisValue, {_, VariantSchema}} =
         genlib_map:search(
             fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
             Variants
         ),
 
-    list_diff_fields_inner_(Diff, VariantSchema, [DisValue | PathRev], Acc).
+    #{DisValue => build_pathmap_map(Diff, VariantSchema)}.
 
-list_diff_fields_simple_(Diff, Schema, PathRev, AccInit) when is_map(Diff), is_map(Schema) ->
+build_pathmap_map(Diff, Schema) ->
     feat_utils:zipfold(
         fun(_Feature, DiffPart, SchemaPart, Acc) ->
-            list_diff_fields_(DiffPart, SchemaPart, PathRev, Acc)
+            merge_pathmaps(Acc, build_pathmap(DiffPart, SchemaPart))
         end,
-        AccInit,
+        #{},
         Diff,
         Schema
     ).
 
-get_path({Accessor, _Schema}) ->
-    accessor_to_path(Accessor);
-get_path(Accessor) when is_list(Accessor); is_binary(Accessor) ->
-    accessor_to_path(Accessor);
-get_path(_) ->
-    [].
+merge_pathmaps(_Left, Right) when map_size(Right) =:= 0 ->
+    #{};
+merge_pathmaps(Left, Right) ->
+    maps:fold(
+        fun(Key, RightValue, Acc) ->
+            case maps:find(Key, Acc) of
+                {ok, LeftValue} when
+                    map_size(LeftValue) == 0;
+                    map_size(RightValue) == 0
+                ->
+                    Acc#{Key => #{}};
+                {ok, LeftValue} ->
+                    Acc#{Key => merge_pathmaps(LeftValue, RightValue)};
+                error ->
+                    Acc#{Key => RightValue}
+            end
+        end,
+        Left,
+        Right
+    ).
+
+nested_map(Keys, InitAcc) ->
+    lists:foldr(fun(Key, Acc) -> #{Key => Acc} end, InitAcc, Keys).
 
 accessor_to_path(Key) when is_binary(Key) ->
     [Key];

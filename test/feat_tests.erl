@@ -233,7 +233,6 @@ simple_featurefull_schema_list_diff_fields_test() ->
         %% The only way to differentiate union values is to encode them directly to field paths
         %% (e.g. <<"1.0.a">> in this case)
         [
-            <<"1.0.common_value_2">>,
             <<"1.0">>,
             <<"1.1">>,
             <<"1.2">>,
