@@ -225,13 +225,6 @@ simple_featurefull_schema_compare_test() ->
 -spec simple_featurefull_schema_list_diff_fields_test() -> _.
 simple_featurefull_schema_list_diff_fields_test() ->
     ?assertEqual(
-        %% DISCUSS: first two elements are correct, but intuitively misleading:
-        %% Looking at diff (can be found in the previous test),
-        %% The first element differs in one of common values, yet the union part is differs completely,
-        %% and because there was no accessor on the way, <<"1.0">> is correct, but misleading:
-        %% we have both <<"1.0">> and <<"1.0.common_value_2">>
-        %% The only way to differentiate union values is to encode them directly to field paths
-        %% (e.g. <<"1.0.a">> in this case)
         [
             <<"1.0">>,
             <<"1.1">>,
@@ -292,38 +285,66 @@ all_events_test() ->
     end,
     _ = feat:read(Handler, Schema, Request),
 
-    Expected = [
+    %% NOTE: following nested-lists formatting is for better demonstration of event flow for single read
+    %% comparing to original data structure: most events go in pair,
+    %% essentially copying parentheses and braces structure of schema/request
+    Expected = lists:flatten([
         {request_visited, Request},
 
-        {request_key_visit, <<"key">>, Elements},
-        {request_key_visited, <<"key">>, Elements},
+        [
+            {request_key_visit, <<"key">>, Elements},
 
-        %% NOTE: Elements are out of order due to how set feature encoding is implemented
-        {request_index_visit, 2, Element2},
-        {request_key_visit, <<"type">>, <<"missing">>},
-        {request_key_visited, <<"type">>, <<"missing">>},
-        {missing_union_variant, <<"missing">>, Element2, UnionSchema},
-        {request_index_visited, 2, Element2},
+            %% NOTE: Set elements are out of order due to how set feature encoding is implemented
+            [
+                {request_index_visit, 2, Element2},
+                [
+                    {request_key_visit, <<"type">>, <<"missing">>},
+                    {missing_union_variant, <<"missing">>, Element2, UnionSchema},
+                    {request_key_visited, <<"type">>, <<"missing">>}
+                ],
+                {request_index_visited, 2, Element2}
+            ],
 
-        {request_index_visit, 0, Element0},
-        {request_key_visit, <<"type">>, <<"variant">>},
-        {request_key_visited, <<"type">>, <<"variant">>},
-        {request_variant_visit, 2, <<"variant">>, Element0},
-        {request_key_visit, <<"field">>, <<"value">>},
-        {request_key_visited, <<"field">>, <<"value">>},
-        {request_variant_visited, 2, <<"variant">>, Element0},
-        {request_index_visited, 0, Element0},
+            [
+                {request_index_visit, 0, Element0},
+                [
+                    {request_key_visit, <<"type">>, <<"variant">>},
+                    {request_key_visited, <<"type">>, <<"variant">>}
+                ],
+                [
+                    {request_variant_visit, 2, <<"variant">>, Element0},
+                    [
+                        {request_key_visit, <<"field">>, <<"value">>},
+                        {request_key_visited, <<"field">>, <<"value">>}
+                    ],
+                    {request_variant_visited, 2, <<"variant">>, Element0}
+                ],
+                {request_index_visited, 0, Element0}
+            ],
 
-        {request_index_visit, 1, Element1},
-        {request_key_visit, <<"type">>, <<"variant">>},
-        {request_key_visited, <<"type">>, <<"variant">>},
-        {request_variant_visit, 2, <<"variant">>, Element1},
-        {request_key_visit, <<"nested">>, [<<"nope">>]},
-        {invalid_schema_fragment, [<<"field">>], [<<"nope">>]},
-        {request_key_visited, <<"nested">>, [<<"nope">>]},
-        {request_variant_visited, 2, <<"variant">>, Element1},
-        {request_index_visited, 1, Element1}
-    ],
+            [
+                {request_index_visit, 1, Element1},
+                [
+                    [
+                        {request_key_visit, <<"type">>, <<"variant">>},
+                        {request_key_visited, <<"type">>, <<"variant">>}
+                    ],
+                    [
+                        {request_variant_visit, 2, <<"variant">>, Element1},
+                        [
+                            {request_key_visit, <<"nested">>, [<<"nope">>]},
+                            {invalid_schema_fragment, [<<"field">>], [<<"nope">>]},
+                            {request_key_visited, <<"nested">>, [<<"nope">>]}
+                        ],
+                        {request_variant_visited, 2, <<"variant">>, Element1}
+                    ]
+                ],
+                {request_index_visited, 1, Element1}
+            ]
+        ],
+
+        {request_key_visited, <<"key">>, Elements}
+    ]),
 
     ?assertEqual(Expected, receive_all()).
 

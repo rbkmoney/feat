@@ -66,13 +66,15 @@
     | {request_variant_visit, feature_name(), Variant :: request_value(), Value :: request()}
     | {request_variant_visited, feature_name(), Variant :: request_value(), Value :: request()}
     | {missing_union_variant, Variant :: request_value(), request(), union_schema()}
-    %% Data format errors
-    | {invalid_schema_fragment, request_key(), request()}.
+    %% Data or Schema errors (depends on Correct data representation)
+    | {invalid_schema_fragment, request_key(), request()}
+    | {missing_union_variant_value, request(), union_schema()}.
 
 -type no_return(_T) :: no_return().
 
 -type error() ::
     {invalid_schema, term()}
+    | {invalid_union_variants, union_schema()}
     | {invalid_union_variant_schema, Variant :: request_value(), InvalidVariantSchema :: term(), union_schema()}.
 
 -type event_handler() :: {module(), options()} | fun((event()) -> ok) | undefined.
@@ -106,23 +108,31 @@ read(Schema, Request) ->
 -spec read(event_handler(), schema(), request()) -> features().
 read(Handler, Schema, Request) when tuple_size(Handler) =:= 2; is_function(Handler, 1); Handler =:= undefined ->
     handle_event(Handler, {request_visited, Request}),
-    read_(Schema, Request, Handler).
+    do_read(Schema, Request, Handler).
 
-read_(_, undefined, _Handler) ->
+do_read(_, undefined, _Handler) ->
     undefined;
-read_(SeqSchema, RequestList, Handler) when is_list(RequestList) ->
-    read_seq_(SeqSchema, RequestList, Handler);
-read_(InnerSchema, Request, Handler) ->
-    read_inner_(InnerSchema, Request, Handler).
+do_read(MapSchema = #{}, Request, Handler) ->
+    do_read_map(MapSchema, Request, Handler);
+do_read({union, Accessor, Variants}, Request, Handler) ->
+    do_read_union(Accessor, Variants, Request, Handler);
+do_read({set, Schema}, RequestList, Handler) when is_list(RequestList) ->
+    do_read_set(Schema, RequestList, Handler);
+do_read({Accessor, Schema}, Request, Handler) ->
+    do_read_nested(Accessor, Schema, Request, Handler);
+do_read(Accessor, Request, Handler) when is_binary(Accessor); is_list(Accessor) ->
+    do_read_accessor(Accessor, Request, Handler);
+do_read(InvalidSchema, _Request, _Handler) ->
+    error({invalid_schema, InvalidSchema}).
 
-read_seq_({set, Schema}, RequestList, Handler) ->
+do_read_set(Schema, RequestList, Handler) ->
     {_, ListIndex} = lists:foldl(fun(Item, {N, Acc}) -> {N + 1, [{N, Item} | Acc]} end, {0, []}, RequestList),
 
     ListSorted = lists:keysort(2, ListIndex),
     lists:foldl(
         fun({Index, Req}, Acc) ->
             handle_event(Handler, {request_index_visit, Index, Req}),
-            Value = read_(Schema, Req, Handler),
+            Value = do_read(Schema, Req, Handler),
             handle_event(Handler, {request_index_visited, Index, Req}),
             [[Index, Value] | Acc]
         end,
@@ -130,76 +140,104 @@ read_seq_({set, Schema}, RequestList, Handler) ->
         ListSorted
     ).
 
-read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
-    VariantName = read_raw_request_value(Accessor, Request, Handler),
-    case maps:find(VariantName, Variants) of
+do_read_union(TypeAccessor, Variants, Request, Handler) ->
+    VariantResult =
+        read_request_value(
+            TypeAccessor,
+            Request,
+            Handler,
+            fun
+                ({ok, Variant}) ->
+                    do_read_union_variant(Variant, TypeAccessor, Variants, Request, Handler);
+                (error) ->
+                    handle_event(Handler, {missing_union_variant_value, Request, {union, TypeAccessor, Variants}}),
+                    undefined
+            end
+        ),
+
+    case VariantResult of
+        undefined ->
+            undefined;
+        {ok, Variant, Feature, InnerSchema} ->
+            handle_event(Handler, {request_variant_visit, Feature, Variant, Request}),
+            Result = [Feature, do_read_map(InnerSchema, Request, Handler)],
+            handle_event(Handler, {request_variant_visited, Feature, Variant, Request}),
+            Result
+    end.
+
+do_read_union_variant(Variant, TypeAccessor, Variants = #{}, Request, Handler) ->
+    case maps:find(Variant, Variants) of
         {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
-            handle_event(Handler, {request_variant_visit, Feature, VariantName, Request}),
-            Result = [Feature, read_inner_(InnerSchema, Request, Handler)],
-            handle_event(Handler, {request_variant_visited, Feature, VariantName, Request}),
-            Result;
+            {ok, Variant, Feature, InnerSchema};
         {ok, InvalidVariantSchema} ->
-            error({invalid_union_variant_schema, VariantName, InvalidVariantSchema, UnionSchema});
+            error({invalid_union_variant_schema, Variant, InvalidVariantSchema, {union, TypeAccessor, Variants}});
         error ->
-            handle_event(Handler, {missing_union_variant, VariantName, Request, UnionSchema}),
+            handle_event(Handler, {missing_union_variant, Variant, Request, {union, TypeAccessor, Variants}}),
             undefined
     end;
-read_inner_(Schema, Request, Handler) ->
-    read_simple_(Schema, Request, Handler).
+do_read_union_variant(_Variant, TypeAccessor, NotVariants, _Request, _Handler) ->
+    error({invalid_union_variants, {union, TypeAccessor, NotVariants}}).
 
-read_simple_(Schema, Request, Handler) when is_map(Schema) ->
+do_read_map(Schema, Request, Handler) when is_map(Schema) ->
     maps:fold(
         fun
             (_Name, 'reserved', Acc) ->
                 Acc;
             (Name, NestedSchema, Acc) ->
-                Acc#{Name => read_(NestedSchema, Request, Handler)}
+                Acc#{Name => do_read(NestedSchema, Request, Handler)}
         end,
         #{},
         Schema
-    );
-read_simple_({Accessor, NestedSchema}, Request, Handler) ->
-    NestedRequest = read_raw_request_value(Accessor, Request, Handler),
-    read_(NestedSchema, NestedRequest, Handler);
-read_simple_(Accessor, Request, Handler) when is_binary(Accessor); is_list(Accessor) ->
-    read_hashed_request_value(Accessor, Request, Handler);
-%% Finally falling from `read` to here: schema is invalid
-read_simple_(Schema, _Request, _Handler) ->
-    error({invalid_schema, Schema}).
+    ).
 
-read_raw_request_value(Accessor, Request, Handler) ->
-    case read_request_value(Accessor, Request, Handler) of
-        {ok, Value} -> Value;
-        undefined -> undefined
-    end.
-read_hashed_request_value(Accessor, Request, Handler) ->
-    case read_request_value(Accessor, Request, Handler) of
-        {ok, Value} -> hash(Value);
-        undefined -> undefined
-    end.
+do_read_nested(Accessor, Schema, Request, Handler) ->
+    read_request_value(
+        Accessor,
+        Request,
+        Handler,
+        fun(Arg) ->
+            NestedRequest =
+                case Arg of
+                    {ok, Value} -> Value;
+                    error -> undefined
+                end,
+            do_read(Schema, NestedRequest, Handler)
+        end
+    ).
 
-read_request_value(Accessor, Value, Handler) ->
-    read_request_value_(accessor_to_path(Accessor), Value, Handler).
+do_read_accessor(Accessor, Request, Handler) ->
+    read_request_value(
+        Accessor,
+        Request,
+        Handler,
+        fun
+            ({ok, Value}) -> hash(Value);
+            (error) -> undefined
+        end
+    ).
 
-read_request_value_(_, undefined, _) ->
-    undefined;
-read_request_value_([], Value, _) ->
-    {ok, Value};
-read_request_value_([Key | Rest], Request, Handler) when is_binary(Key), is_map(Request) ->
+read_request_value(Accessor, Value, Handler, Then) when is_function(Then, 1) ->
+    read_request_value_(accessor_to_path(Accessor), Value, Handler, Then).
+
+read_request_value_(_, undefined, _, Then) ->
+    Then(error);
+read_request_value_([], Value, _, Then) ->
+    Then({ok, Value});
+read_request_value_([Key | Rest], Request, Handler, Then) when is_binary(Key), is_map(Request) ->
     case maps:find(Key, Request) of
         {ok, SubRequest} ->
             handle_event(Handler, {request_key_visit, Key, SubRequest}),
-            Result = read_request_value_(Rest, SubRequest, Handler),
+            Result = read_request_value_(Rest, SubRequest, Handler, Then),
             handle_event(Handler, {request_key_visited, Key, SubRequest}),
             Result;
         error ->
-            undefined
+            Then(error)
     end;
-read_request_value_(Key, Request, Handler) ->
+read_request_value_(Key, Request, Handler, _Then) ->
     handle_event(Handler, {invalid_schema_fragment, Key, Request}),
     undefined.
 
-%% DISCUSS: do we need this though?
+%% DISCUSS: do we need this "ok" though?
 handle_event(Handler, Event) ->
     ok =
         case Handler of
@@ -211,8 +249,8 @@ handle_event(Handler, Event) ->
                 default_handle_event(Event)
         end.
 
-default_handle_event({missing_union_variant, VariantName, Request, Schema}) ->
-    logger:warning("Missing union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
+default_handle_event({missing_union_variant, Variant, Request, Schema}) ->
+    logger:warning("Missing union variant ~p in request subset: ~p for schema  ~p", [Variant, Request, Schema]),
     ok;
 default_handle_event({invalid_schema_fragment, Key, Request}) ->
     logger:warning("Unable to extract idemp feature with schema: ~p from client request subset: ~p", [Key, Request]),
@@ -235,7 +273,7 @@ compare(Features, FeaturesWith) ->
     end.
 
 compare_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
-    compare_simple_features(Fs, FsWith);
+    compare_map_features(Fs, FsWith);
 %% NOTE: this seems very fragile, but if the contract for sets (list of lists) stands, this will do
 compare_features([VIndex1, _] = Fs, [VIndex2, _] = FsWith) when is_integer(VIndex1), is_integer(VIndex2) ->
     compare_union_features(Fs, FsWith);
@@ -255,7 +293,7 @@ compare_features(_, _) ->
     ?difference.
 
 %% Simple
-compare_simple_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
+compare_map_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
     acc_to_diff(
         feat_utils:zipfold(
             fun(Key, Value, ValueWith, Acc) ->
@@ -268,6 +306,17 @@ compare_simple_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
         )
     ).
 
+compare_union_features([Variant, _], [VariantWith, _]) when Variant /= VariantWith ->
+    ?difference;
+compare_union_features([VariantFeature, Features], [_, FeaturesWith]) when is_map(Features), is_map(FeaturesWith) ->
+    case compare_map_features(Features, FeaturesWith) of
+        %% forwarding no-change for correct minimization
+        M when map_size(M) == 0 ->
+            #{};
+        Diff ->
+            [VariantFeature, Diff]
+    end.
+
 compare_list_features(L1, L2) when length(L1) =/= length(L2) ->
     ?difference;
 compare_list_features(L1, L2) ->
@@ -278,17 +327,6 @@ compare_list_features_([], [], Acc) ->
 compare_list_features_([[Index, V1] | Values], [[_, V2] | ValuesWith], Acc) ->
     Diff = compare_features(V1, V2),
     compare_list_features_(Values, ValuesWith, accumulate(Index, Diff, Acc)).
-
-compare_union_features([Variant, _], [VariantWith, _]) when Variant /= VariantWith ->
-    ?difference;
-compare_union_features([VariantFeature, Features], [_, FeaturesWith]) when is_map(Features), is_map(FeaturesWith) ->
-    case compare_simple_features(Features, FeaturesWith) of
-        %% forwarding no-change for correct minimization
-        M when map_size(M) == 0 ->
-            #{};
-        Diff ->
-            [VariantFeature, Diff]
-    end.
 
 %% Acc values
 %% 1. Usually {ActualDiffAcc, SimpleDiffCount} (simple diff = ?difference and not nested map)
