@@ -11,7 +11,7 @@
 -type simple_schema() :: #{feature_name() := accessor() | {accessor(), schema()} | inner_schema()}.
 -type seq_schema() :: set_schema().
 -type set_schema() :: {set, inner_schema()}.
--type union_variants() :: #{request_value() => {feature_name(), inner_schema()}}.
+-type union_variants() :: #{request_value() := {feature_name(), inner_schema()}}.
 -type union_schema() :: {union, accessor(), union_variants()}.
 
 -type inner_schema() ::
@@ -34,6 +34,7 @@
 
 -type feature_name() :: non_neg_integer().
 -type field_feature() :: integer() | undefined.
+-type seq_index() :: integer().
 -type feature_value() :: field_feature() | features().
 -type simple_features() :: #{feature_name() := feature_value()}.
 -type seq_features() :: set_features().
@@ -49,14 +50,24 @@
     | simple_difference()
     | union_difference().
 
+%% MAYBE: Currently events are somewhat restricted in what you can do with them,
+%% because you don't have a complete context, e.g path (although you can build one from scratch)
+%% Have to evaluate the applications of events in prod
 -type event() ::
-    {missing_union_variant, Variant :: request_value(), request(), union_schema()}
-    | {invalid_schema_fragment, feature_name(), request()}
-    | {request_visited, {request, request()}}
-    | {request_key_index_visit, integer()}
-    | {request_key_index_visited, integer()}
-    | {request_key_visit, {key, integer(), request()}}
-    | {request_key_visited, {key, integer()}}.
+    %% Entry
+    {request_visited, request()}
+    %% Nested
+    | {request_key_visit, request_key(), Value :: request()}
+    | {request_key_visited, request_key(), Value :: request()}
+    %% Seq
+    | {request_index_visit, seq_index(), Value :: request()}
+    | {request_index_visited, seq_index(), Value :: request()}
+    %% Unions
+    | {request_variant_visit, feature_name(), Variant :: request_value(), Value :: request()}
+    | {request_variant_visited, feature_name(), Variant :: request_value(), Value :: request()}
+    | {missing_union_variant, Variant :: request_value(), request(), union_schema()}
+    %% Data format errors
+    | {invalid_schema_fragment, request_key(), request()}.
 
 -type no_return(_T) :: no_return().
 
@@ -64,7 +75,7 @@
     {invalid_schema, term()}
     | {invalid_union_variant_schema, Variant :: request_value(), InvalidVariantSchema :: term(), union_schema()}.
 
--type event_handler() :: {module(), options()} | undefined.
+-type event_handler() :: {module(), options()} | fun((event()) -> ok) | undefined.
 -type options() :: term().
 
 -export_type([request_key/0]).
@@ -93,8 +104,8 @@ read(Schema, Request) ->
     read(get_event_handler(), Schema, Request).
 
 -spec read(event_handler(), schema(), request()) -> features().
-read(Handler, Schema, Request) ->
-    handle_event(Handler, {request_visited, {request, Request}}),
+read(Handler, Schema, Request) when tuple_size(Handler) =:= 2; is_function(Handler, 1); Handler =:= undefined ->
+    handle_event(Handler, {request_visited, Request}),
     read_(Schema, Request, Handler).
 
 read_(_, undefined, _Handler) ->
@@ -110,9 +121,9 @@ read_seq_({set, Schema}, RequestList, Handler) ->
     ListSorted = lists:keysort(2, ListIndex),
     lists:foldl(
         fun({Index, Req}, Acc) ->
-            handle_event(Handler, {request_key_index_visit, Index}),
+            handle_event(Handler, {request_index_visit, Index, Req}),
             Value = read_(Schema, Req, Handler),
-            handle_event(Handler, {request_key_index_visited, Index}),
+            handle_event(Handler, {request_index_visited, Index, Req}),
             [[Index, Value] | Acc]
         end,
         [],
@@ -122,13 +133,16 @@ read_seq_({set, Schema}, RequestList, Handler) ->
 read_inner_({union, Accessor, Variants} = UnionSchema, Request, Handler) ->
     VariantName = read_raw_request_value(Accessor, Request, Handler),
     case maps:find(VariantName, Variants) of
+        {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
+            handle_event(Handler, {request_variant_visit, Feature, VariantName, Request}),
+            Result = [Feature, read_inner_(InnerSchema, Request, Handler)],
+            handle_event(Handler, {request_variant_visited, Feature, VariantName, Request}),
+            Result;
+        {ok, InvalidVariantSchema} ->
+            error({invalid_union_variant_schema, VariantName, InvalidVariantSchema, UnionSchema});
         error ->
             handle_event(Handler, {missing_union_variant, VariantName, Request, UnionSchema}),
-            undefined;
-        {ok, {Feature, InnerSchema}} when is_integer(Feature) ->
-            [Feature, read_inner_(InnerSchema, Request, Handler)];
-        {ok, InvalidVariantSchema} ->
-            error({invalid_union_variant_schema, VariantName, InvalidVariantSchema, UnionSchema})
+            undefined
     end;
 read_inner_(Schema, Request, Handler) ->
     read_simple_(Schema, Request, Handler).
@@ -147,7 +161,7 @@ read_simple_(Schema, Request, Handler) when is_map(Schema) ->
 read_simple_({Accessor, NestedSchema}, Request, Handler) ->
     NestedRequest = read_raw_request_value(Accessor, Request, Handler),
     read_(NestedSchema, NestedRequest, Handler);
-read_simple_(Accessor, Request, Handler) when is_binary(Accessor) ->
+read_simple_(Accessor, Request, Handler) when is_binary(Accessor); is_list(Accessor) ->
     read_hashed_request_value(Accessor, Request, Handler);
 %% Finally falling from `read` to here: schema is invalid
 read_simple_(Schema, _Request, _Handler) ->
@@ -174,26 +188,37 @@ read_request_value_([], Value, _) ->
 read_request_value_([Key | Rest], Request, Handler) when is_binary(Key), is_map(Request) ->
     case maps:find(Key, Request) of
         {ok, SubRequest} ->
-            handle_event(Handler, {request_key_visit, {key, Key, SubRequest}}),
+            handle_event(Handler, {request_key_visit, Key, SubRequest}),
             Result = read_request_value_(Rest, SubRequest, Handler),
-            handle_event(Handler, {request_key_visited, {key, Key}}),
+            handle_event(Handler, {request_key_visited, Key, SubRequest}),
             Result;
         error ->
             undefined
     end;
 read_request_value_(Key, Request, Handler) ->
-    handle_event(Handler, {invalid_schema_fragment, Key, Request}).
+    handle_event(Handler, {invalid_schema_fragment, Key, Request}),
+    undefined.
 
-handle_event(undefined, {missing_union_variant, VariantName, Request, Schema}) ->
+%% DISCUSS: do we need this though?
+handle_event(Handler, Event) ->
+    ok =
+        case Handler of
+            FunHandler when is_function(FunHandler, 1) ->
+                FunHandler(Event);
+            {Mod, Opts} ->
+                Mod:handle_event(Event, Opts);
+            undefined ->
+                default_handle_event(Event)
+        end.
+
+default_handle_event({missing_union_variant, VariantName, Request, Schema}) ->
     logger:warning("Missing union variant ~p in request subset: ~p for schema  ~p", [VariantName, Request, Schema]),
-    undefined;
-handle_event(undefined, {invalid_schema_fragment, Key, Request}) ->
-    logger:warning("Unable to extract idemp feature with schema: ~p from client request subset: ~p", [Key, Request]),
-    undefined;
-handle_event(undefined, _Event) ->
     ok;
-handle_event({Mod, Opts}, Event) ->
-    Mod:handle_event(Event, Opts).
+default_handle_event({invalid_schema_fragment, Key, Request}) ->
+    logger:warning("Unable to extract idemp feature with schema: ~p from client request subset: ~p", [Key, Request]),
+    ok;
+default_handle_event(_) ->
+    ok.
 
 get_event_handler() ->
     genlib_app:env(feat, event_handler, undefined).
