@@ -8,17 +8,17 @@
 
 -type accessor() :: request_key() | nonempty_list(request_key()).
 
--type simple_schema() :: #{feature_name() := accessor() | {accessor(), schema()} | inner_schema()}.
+-type map_schema() :: #{feature_name() := accessor() | {accessor(), schema()} | inner_schema()}.
 -type seq_schema() :: set_schema().
 -type set_schema() :: {set, inner_schema()}.
 -type union_variants() :: #{request_value() := {feature_name(), inner_schema()}}.
 -type union_schema() :: {union, accessor(), union_variants()}.
 
 -type inner_schema() ::
-    simple_schema() | union_schema().
+    map_schema() | union_schema().
 
 -type schema() ::
-    simple_schema()
+    map_schema()
     | seq_schema()
     | union_schema().
 
@@ -36,18 +36,18 @@
 -type field_feature() :: integer() | undefined.
 -type seq_index() :: integer().
 -type feature_value() :: field_feature() | features().
--type simple_features() :: #{feature_name() := feature_value()}.
+-type map_features() :: #{feature_name() := feature_value()}.
 -type seq_features() :: set_features().
 -type set_features() :: [list_tuple(Index :: integer(), feature_value())].
--type union_features() :: list_tuple(feature_name(), simple_features()).
--type features() :: simple_features() | seq_features() | union_features().
+-type union_features() :: list_tuple(feature_name(), map_features()).
+-type features() :: map_features() | seq_features() | union_features().
 
 -type total_difference() :: ?difference.
--type simple_difference() :: #{feature_name() := difference()}.
+-type map_difference() :: #{feature_name() := difference()}.
 -type union_difference() :: {feature_name(), difference()}.
 -type difference() ::
     total_difference()
-    | simple_difference()
+    | map_difference()
     | union_difference().
 
 %% MAYBE: Currently events are somewhat restricted in what you can do with them,
@@ -292,7 +292,6 @@ compare_features(Fs, Fs) ->
 compare_features(_, _) ->
     ?difference.
 
-%% Simple
 compare_map_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
     acc_to_diff(
         feat_utils:zipfold(
