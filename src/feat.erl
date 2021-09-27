@@ -432,6 +432,8 @@ build_pathmap_map(Diff, Schema) ->
 
 merge_pathmaps(_Left, Right) when map_size(Right) =:= 0 ->
     #{};
+merge_pathmaps(Left, Right) when map_size(Left) =:= 0 ->
+    Right;
 merge_pathmaps(Left, Right) ->
     maps:fold(
         fun(Key, RightValue, Acc) ->
