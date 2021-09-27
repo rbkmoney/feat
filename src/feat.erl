@@ -412,13 +412,15 @@ build_pathmap_nested(Diff, Accessor, Schema) ->
 build_pathmap_union([_, ?difference], _Variants) ->
     #{};
 build_pathmap_union([Variant, Diff], Variants) ->
-    {DisValue, {_, VariantSchema}} =
+    {_DisValue, {_, VariantSchema}} =
         genlib_map:search(
             fun(_DisValue, {FeatureName, _Schema}) -> FeatureName =:= Variant end,
             Variants
         ),
 
-    #{DisValue => build_pathmap_map(Diff, VariantSchema)}.
+    %% NOTE: It might be better to provide union variant as well (DisValue above)
+    %% But since caller has original request, it's clear to them what variant it is anyway
+    build_pathmap_map(Diff, VariantSchema).
 
 build_pathmap_map(Diff, Schema) ->
     genlib_map:zipfold(

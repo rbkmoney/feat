@@ -229,8 +229,8 @@ simple_featurefull_schema_list_diff_fields_test() ->
             <<"1.0">>,
             <<"1.1">>,
             <<"1.2">>,
-            <<"1.3.b.31.0">>,
-            <<"1.4.c.41.412">>
+            <<"1.3.31.0">>,
+            <<"1.4.41.412">>
         ],
         begin
             Features = feat:read(?SCHEMA, ?REQUEST),
