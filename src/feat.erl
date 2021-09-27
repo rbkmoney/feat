@@ -294,7 +294,7 @@ compare_features(_, _) ->
 
 compare_map_features(Fs, FsWith) when is_map(Fs), is_map(FsWith) ->
     acc_to_diff(
-        feat_utils:zipfold(
+        genlib_map:zipfold(
             fun(Key, Value, ValueWith, Acc) ->
                 Diff = compare_features(Value, ValueWith),
                 accumulate(Key, Diff, Acc)
@@ -421,7 +421,7 @@ build_pathmap_union([Variant, Diff], Variants) ->
     #{DisValue => build_pathmap_map(Diff, VariantSchema)}.
 
 build_pathmap_map(Diff, Schema) ->
-    feat_utils:zipfold(
+    genlib_map:zipfold(
         fun(_Feature, DiffPart, SchemaPart, Acc) ->
             merge_pathmaps(Acc, build_pathmap(DiffPart, SchemaPart))
         end,
