@@ -439,17 +439,8 @@ merge_pathmaps(Left, Right) when map_size(Left) =:= 0 ->
 merge_pathmaps(Left, Right) ->
     maps:fold(
         fun(Key, RightValue, Acc) ->
-            case maps:find(Key, Acc) of
-                {ok, LeftValue} when
-                    map_size(LeftValue) == 0;
-                    map_size(RightValue) == 0
-                ->
-                    Acc#{Key => #{}};
-                {ok, LeftValue} ->
-                    Acc#{Key => merge_pathmaps(LeftValue, RightValue)};
-                error ->
-                    Acc#{Key => RightValue}
-            end
+            LeftValue = maps:get(Key, Acc, #{}),
+            Acc#{Key => merge_pathmaps(LeftValue, RightValue)}
         end,
         Left,
         Right
