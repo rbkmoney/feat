@@ -195,13 +195,9 @@ do_read_nested(Accessor, Schema, Request, Handler) ->
         Accessor,
         Request,
         Handler,
-        fun(Arg) ->
-            NestedRequest =
-                case Arg of
-                    {ok, Value} -> Value;
-                    error -> undefined
-                end,
-            do_read(Schema, NestedRequest, Handler)
+        fun
+            ({ok, Value}) -> do_read(Schema, Value, Handler);
+            (error) -> undefined
         end
     ).
 
