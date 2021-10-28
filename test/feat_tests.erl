@@ -241,6 +241,30 @@ simple_featurefull_schema_list_diff_fields_test() ->
         end
     ).
 
+-spec top_level_sharing_union_test() -> _.
+top_level_sharing_union_test() ->
+    Schema = #{
+        1 => <<"common_field">>,
+        2 =>
+            {union, <<"type">>, #{
+                <<"a">> => {3, #{5 => <<"field">>}},
+                <<"b">> => {4, #{5 => <<"field">>}}
+            }}
+    },
+    Request = #{
+        <<"common_field">> => <<"common_value">>,
+        <<"type">> => <<"a">>,
+        <<"field">> => <<"value">>
+    },
+    AnotherRequest = Request#{<<"type">> => <<"b">>},
+
+    Features = feat:read(Schema, Request),
+    AnotherFeatures = feat:read(Schema, AnotherRequest),
+
+    {false, Difference} = feat:compare(Features, AnotherFeatures),
+    ?assertEqual(#{2 => ?difference}, Difference),
+    ?assertEqual(all, feat:list_diff_fields(Schema, Difference)).
+
 -dialyzer({nowarn_function, fail_on_invalid_schema_test/0}).
 -spec fail_on_invalid_schema_test() -> _.
 fail_on_invalid_schema_test() ->

@@ -356,12 +356,18 @@ acc_to_diff({Diff, _}) ->
 list_diff_fields(_Schema, ?difference) ->
     all;
 list_diff_fields(Schema, Diff) ->
-    lists:sort(
-        lists:map(
-            fun(Keys) -> list_to_binary(lists:join(<<".">>, Keys)) end,
-            unroll_pathmap(build_pathmap(Diff, Schema))
-        )
-    ).
+    Paths = lists:map(
+        fun(Keys) -> list_to_binary(lists:join(<<".">>, Keys)) end,
+        unroll_pathmap(build_pathmap(Diff, Schema))
+    ),
+
+    case Paths of
+        %% The only reason for empty paths list is difference in features that lack request-key
+        %% The only such case is top-level union with common fields (see test-case top_level_sharing_union_test)
+        %% It doesn't matter deeply nested feature-wise.
+        [] -> all;
+        _ -> lists:sort(Paths)
+    end.
 
 unroll_pathmap(Pathmap) ->
     maps:fold(
